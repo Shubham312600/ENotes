@@ -40,15 +40,16 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] Voice recording and AI remain unavailable and explicitly say so; account/cloud sync and notification/reminders remain unconfigured.
 - [ ] Compare a runtime screenshot with the supplied reference; source implementation alone does not establish visual parity.
 
-## Dashboard correction pass (2026-10-20; implementation complete, CI pending)
+## Dashboard correction pass (2026-10-20; CI passed, runtime verification pending)
 - [x] Reworked Notes into one vertically scrolling dashboard and made five actions and five category shortcuts responsive, eliminating the clipped horizontal strips.
 - [x] Added a separate filter control for category, folder, pinned-only, and title sorting; kept counts bound to active Room notes.
 - [x] Restyled recent notes as bordered cards with document tiles, category/folder metadata, timestamps, attachment access, and supported overflow actions.
 - [x] Added a circular purple creation FAB, a working More destination, and the subtle footer treatment while retaining Archive, Trash, and Settings.
 - [x] Fixed document import naming by reading `OpenableColumns.DISPLAY_NAME`; imported files now remain attachments with an empty note body.
 - [x] Added a targeted Room 2→3 data-preserving repair for the exact numeric-title/boilerplate-body attachment record created by the old importer. Its attachment URI and category are retained; category is not silently reassigned.
-- [x] Checked the prior PR CI: run #20 passed at the previous branch head `565f97a` (Android debug build and APK artifact upload).
-- [ ] Build this correction revision and inspect the produced APK artifact; this machine has no JDK, Gradle, or Android SDK.
+- [x] Checked the prior PR CI: run #20 passed at previous branch head `565f97a` (Android debug build and APK artifact upload).
+- [x] Correction build passed at branch head `6ec6a3e` (workflow run ID `39394896484`); APK artifact `enotes-debug-apk` uploaded (16,174,472 bytes; expires 2026-11-03).
+- [x] GitHub Actions build/upload steps all succeeded; this machine has no JDK, Gradle, or Android SDK for a local build.
 - [ ] No automated test suite is configured; no emulator is available for migration/navigation/interaction tests or a screenshot comparison.
 - [ ] Screenshot parity remains unverified until an app screenshot is captured and compared at the supplied device size.
 
@@ -80,5 +81,5 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] Review privacy policy, data deletion/export, permissions, and store readiness.
 
 ## Current honest release status
-The repository has a buildable **prototype**, not the complete product. The previous dashboard revision has a successful debug APK build; the dashboard correction pass is awaiting CI. Features above remain unchecked until they are implemented and tested. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
+The repository has a buildable **prototype**, not the complete product. The dashboard correction has a successful debug APK build and uploaded artifact. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
 
