@@ -17,5 +17,6 @@ data class Note(
  val attachmentUri: String? = null,
  @ColumnInfo(defaultValue = "'Medium'") val priority: String = "Medium",
  val reminderAt: Long? = null,
- @ColumnInfo(defaultValue = "'purple'") val labelColor: String = "purple"
+ @ColumnInfo(defaultValue = "'purple'") val labelColor: String = "purple",
+ @ColumnInfo(defaultValue = "'[]'") val richContentJson: String = "[]"
 )

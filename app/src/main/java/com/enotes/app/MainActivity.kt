@@ -93,8 +93,8 @@ class NotesViewModel(private val repo: NotesRepository) : ViewModel() {
     val archived = repo.observeArchived().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val trash = repo.observeTrash().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val folders = repo.observeFolders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    fun save(title: String, body: String, old: Note?, category: String = old?.category ?: "Others", folder: String? = old?.folder, attachmentUri: String? = old?.attachmentUri, priority: String = old?.priority ?: "Medium", reminderAt: Long? = old?.reminderAt, labelColor: String = old?.labelColor ?: "purple", isPinned: Boolean = old?.isPinned ?: false) {
-        viewModelScope.launch { repo.save(title, body, old, category, folder, attachmentUri, priority, reminderAt, labelColor, isPinned) }
+    fun save(title: String, body: String, old: Note?, category: String = old?.category ?: "Others", folder: String? = old?.folder, attachmentUri: String? = old?.attachmentUri, priority: String = old?.priority ?: "Medium", reminderAt: Long? = old?.reminderAt, labelColor: String = old?.labelColor ?: "purple", isPinned: Boolean = old?.isPinned ?: false, richContentJson: String = old?.richContentJson ?: "[]") {
+        viewModelScope.launch { repo.save(title, body, old, category, folder, attachmentUri, priority, reminderAt, labelColor, isPinned, richContentJson) }
     }
     fun createFolder(name: String) { viewModelScope.launch { repo.createFolder(name) } }
     fun trash(note: Note) { viewModelScope.launch { repo.trash(note) } }
@@ -111,7 +111,7 @@ class NotesViewModel(private val repo: NotesRepository) : ViewModel() {
             val restored = buildList {
                 for (i in 0 until array.length()) {
                     val item = array.getJSONObject(i)
-                    add(Note(id = item.getString("id"), title = item.optString("title", "Untitled note"), body = item.optString("body", ""), createdAt = item.optLong("createdAt", System.currentTimeMillis()), updatedAt = item.optLong("updatedAt", System.currentTimeMillis()), isPinned = item.optBoolean("isPinned", false), isArchived = item.optBoolean("isArchived", false), deletedAt = if (item.isNull("deletedAt")) null else item.optLong("deletedAt"), category = item.optString("category", "Others"), folder = item.optString("folder").takeIf { it.isNotBlank() }, priority = item.optString("priority", "Medium"), reminderAt = if (item.isNull("reminderAt")) null else item.optLong("reminderAt"), labelColor = item.optString("labelColor", "purple")))
+                    add(Note(id = item.getString("id"), title = item.optString("title", "Untitled note"), body = item.optString("body", ""), createdAt = item.optLong("createdAt", System.currentTimeMillis()), updatedAt = item.optLong("updatedAt", System.currentTimeMillis()), isPinned = item.optBoolean("isPinned", false), isArchived = item.optBoolean("isArchived", false), deletedAt = if (item.isNull("deletedAt")) null else item.optLong("deletedAt"), category = item.optString("category", "Others"), folder = item.optString("folder").takeIf { it.isNotBlank() && it != "null" }, attachmentUri = item.optString("attachmentUri").takeIf { it.isNotBlank() && it != "null" }, priority = item.optString("priority", "Medium"), reminderAt = if (item.isNull("reminderAt")) null else item.optLong("reminderAt"), labelColor = item.optString("labelColor", "purple"), richContentJson = item.optString("richContentJson", "[]")))
                 }
             }
             require(restored.size <= 100000) { "Backup contains too many notes." }
@@ -167,27 +167,37 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
     var createFolder by remember { mutableStateOf(false) }
     var fabMenu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Note?>(null) }
-    var selectedAttachmentUri by remember { mutableStateOf<String?>(null) }
+    var pendingEditorMediaKind by remember { mutableStateOf("file") }
+    var pickedEditorBlock by remember { mutableStateOf<RichContentBlock?>(null) }
     var deleteTarget by remember { mutableStateOf<Note?>(null) }
-    LaunchedEffect(editor, editing?.id) {
-        if (editor) selectedAttachmentUri = editing?.attachmentUri
-    }
-    val noteAttachmentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val editorMediaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            selectedAttachmentUri = uri.toString()
+            val mimeType = context.contentResolver.getType(uri).orEmpty()
+            val displayName = runCatching {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                }
+            }.getOrNull().orEmpty().ifBlank { "${pendingEditorMediaKind.replaceFirstChar { it.uppercase() }} attachment" }
+            val kind = when {
+                mimeType.startsWith("image/") -> "image"
+                mimeType.startsWith("video/") -> "video"
+                mimeType.startsWith("audio/") -> "audio"
+                else -> pendingEditorMediaKind
+            }
+            pickedEditorBlock = RichContentBlock(kind = kind, uri = uri.toString(), mimeType = mimeType, title = displayName)
         }
     }
     val source = when(tab) { Tab.NOTES -> notes; Tab.ARCHIVE -> archived; Tab.TRASH -> trash; Tab.SETTINGS, Tab.MORE -> emptyList() }
     val filtered = source.filter {
-        (query.isBlank() || it.title.contains(query, true) || it.body.contains(query, true) || (it.folder?.contains(query, true) == true) || it.category.contains(query, true)) &&
+        (query.isBlank() || it.title.contains(query, true) || it.body.contains(query, true) || decodeRichContent(it.richContentJson).any { block -> block.title.contains(query, true) || block.description.contains(query, true) } || (it.folder?.contains(query, true) == true) || it.category.contains(query, true)) &&
         (tab != Tab.NOTES || categoryFilter == "All Notes" || it.category.equals(categoryFilter, true)) &&
         (tab != Tab.NOTES || folderFilter == null || it.folder == folderFilter) &&
         (tab != Tab.NOTES || !pinnedOnly || it.isPinned)
     }
     val shown = if (sortByTitle && tab != Tab.TRASH) filtered.sortedBy { it.title.lowercase() } else filtered
     Scaffold(
-        topBar = { TopAppBar(title = {
+        topBar = { if (!editor) TopAppBar(title = {
             if (tab == Tab.NOTES) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     BrandMark(38)
@@ -205,19 +215,46 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
             IconButton(onClick = { quickMessage = "Reminders and notifications are not available in this build." }) { Icon(Icons.Default.NotificationsNone, "Notifications") }
             IconButton(onClick = { quickMessage = "ENotes is using local storage. Account sign-in is not configured." }, modifier = Modifier.size(42.dp).background(MaterialTheme.colorScheme.primary, CircleShape)) { Icon(Icons.Default.Person, "Account", tint = Color.White) }
         } }) },
-        bottomBar = { NavigationBar {
+        bottomBar = { if (!editor) NavigationBar {
             NavigationBarItem(tab == Tab.NOTES, { tab = Tab.NOTES; query = "" }, { Icon(Icons.Default.StickyNote2, null) }, label = { Text("Notes", maxLines=1) })
             NavigationBarItem(tab == Tab.ARCHIVE, { tab = Tab.ARCHIVE; query = "" }, { Icon(Icons.Default.Archive, null) }, label = { Text("Archive", maxLines=1) })
             NavigationBarItem(tab == Tab.TRASH, { tab = Tab.TRASH; query = "" }, { Icon(Icons.Default.DeleteOutline, null) }, label = { Text("Trash", maxLines=1) })
             NavigationBarItem(tab == Tab.SETTINGS, { tab = Tab.SETTINGS; query = "" }, { Icon(Icons.Default.Settings, null) }, label = { Text("Settings", maxLines=1) })
             NavigationBarItem(tab == Tab.MORE, { tab = Tab.MORE; query = "" }, { Icon(Icons.Default.Apps, null) }, label = { Text("More", maxLines=1) })
         } },
-        floatingActionButton = { if (tab == Tab.NOTES) Box { FloatingActionButton(onClick = { fabMenu = true }, shape=CircleShape, containerColor=Color(0xFF5935E8), contentColor=Color.White) { Icon(Icons.Default.Add, "Create") }; DropdownMenu(expanded = fabMenu, onDismissRequest = { fabMenu = false }) {
+        floatingActionButton = { if (!editor && tab == Tab.NOTES) Box { FloatingActionButton(onClick = { fabMenu = true }, shape=CircleShape, containerColor=Color(0xFF5935E8), contentColor=Color.White) { Icon(Icons.Default.Add, "Create") }; DropdownMenu(expanded = fabMenu, onDismissRequest = { fabMenu = false }) {
             DropdownMenuItem(text = { Text("New note") }, leadingIcon = { Icon(Icons.Default.NoteAdd, null) }, onClick = { fabMenu=false; editing=null; editor=true })
             DropdownMenuItem(text = { Text("New folder") }, leadingIcon = { Icon(Icons.Default.CreateNewFolder, null) }, onClick = { fabMenu=false; createFolder=true })
         } } }
     ) { inset ->
-        if (tab == Tab.SETTINGS) {
+        if (editor) {
+            NoteEditorScreen(
+                modifier = Modifier.fillMaxSize().padding(inset),
+                note = editing,
+                folders = folders,
+                pickedBlock = pickedEditorBlock,
+                onConsumePickedBlock = { pickedEditorBlock = null },
+                onPickMedia = { kind ->
+                    pendingEditorMediaKind = kind
+                    editorMediaLauncher.launch(when (kind) {
+                        "image" -> arrayOf("image/*")
+                        "video" -> arrayOf("video/*")
+                        "audio" -> arrayOf("audio/*")
+                        else -> arrayOf("*/*")
+                    })
+                },
+                onOpenAttachment = { uriText ->
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW).apply { data = android.net.Uri.parse(uriText); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
+                        .onFailure { quickMessage = "No app could open this attachment." }
+                },
+                onSave = { draft ->
+                    vm.save(draft.title, draft.body, editing, draft.category, draft.folder, draft.attachmentUri, draft.priority, draft.reminderAt, draft.labelColor, draft.pinned, draft.richContentJson)
+                    editor = false
+                },
+                onUnavailable = { quickMessage = it },
+                onDismiss = { editor = false }
+            )
+        } else if (tab == Tab.SETTINGS) {
             Column(Modifier.fillMaxSize().padding(inset).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("Settings", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 SettingRow("Storage", "Notes are saved locally on this device.")
@@ -250,6 +287,7 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
                         put("category", note.category); put("folder", note.folder ?: JSONObject.NULL)
                         put("deletedAt", note.deletedAt ?: JSONObject.NULL)
                         put("priority", note.priority); put("reminderAt", note.reminderAt ?: JSONObject.NULL); put("labelColor", note.labelColor)
+                        put("attachmentUri", note.attachmentUri ?: JSONObject.NULL); put("richContentJson", note.richContentJson)
                     }) }
                     val backup = JSONObject().apply { put("format", "enotes-backup-v1"); put("exportedAt", System.currentTimeMillis()); put("notes", array) }.toString(2)
                     val sendIntent = Intent(Intent.ACTION_SEND).apply { type = "application/json"; putExtra(Intent.EXTRA_SUBJECT, "ENotes backup.json"); putExtra(Intent.EXTRA_TEXT, backup) }
@@ -394,23 +432,6 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
             }
         )
     }
-    if (editor) NoteEditorDialog(
-        note = editing,
-        folders = folders,
-        attachmentUri = selectedAttachmentUri,
-        onAttachmentChange = { selectedAttachmentUri = it },
-        onPickAttachment = { noteAttachmentLauncher.launch(arrayOf("image/*", "application/pdf")) },
-        onOpenAttachment = { uriText ->
-            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW).apply { data = android.net.Uri.parse(uriText); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
-                .onFailure { quickMessage = "No app could open this attachment." }
-        },
-        onSave = { title, body, category, folder, attachmentUri, priority, reminderAt, labelColor, pinned ->
-            vm.save(title, body, editing, category, folder, attachmentUri, priority, reminderAt, labelColor, pinned)
-            editor = false
-        },
-        onUnavailable = { quickMessage = it },
-        onDismiss = { editor = false }
-    )
     if(createFolder) {
         var name by remember { mutableStateOf("") }
         AlertDialog(onDismissRequest={createFolder=false}, title={Text("New folder")}, text={OutlinedTextField(name,{name=it},label={Text("Folder name")},singleLine=true)},
@@ -773,4 +794,3 @@ private fun SettingRow(title: String, detail: String) {
         Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
-

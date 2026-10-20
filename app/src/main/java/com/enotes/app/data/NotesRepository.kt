@@ -24,7 +24,8 @@ class NotesRepository(private val dao: NoteDao) {
         priority: String = existing?.priority ?: "Medium",
         reminderAt: Long? = existing?.reminderAt,
         labelColor: String = existing?.labelColor ?: "purple",
-        isPinned: Boolean = existing?.isPinned ?: false
+        isPinned: Boolean = existing?.isPinned ?: false,
+        richContentJson: String = existing?.richContentJson ?: "[]"
     ) {
         val now = System.currentTimeMillis()
         dao.upsert(
@@ -42,7 +43,8 @@ class NotesRepository(private val dao: NoteDao) {
                 attachmentUri = attachmentUri,
                 priority = priority,
                 reminderAt = reminderAt,
-                labelColor = labelColor
+                labelColor = labelColor,
+                richContentJson = richContentJson
             )
         )
     }
