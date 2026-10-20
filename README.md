@@ -1,37 +1,43 @@
 # ENotes
 
-ENotes is an Android-first notes and document workspace designed around reliable offline note-taking, fast capture, powerful organization, reminders, documents, and optional AI/Drive integrations.
+ENotes is an Android notes app built with Kotlin, Jetpack Compose, and Room.
 
-**Current status:** An initial native Android starter has been committed. It includes a Compose notes list/editor and a Room-backed local note store. The app has not yet been built or tested in an Android SDK environment, so treat buildability as unverified until CI or Android Studio confirms it.
+## Implemented in the current prototype
 
-## Project roadmap
-Read [docs/README.md](docs/README.md) for the full documentation index. Start with:
-- [Complete product and engineering roadmap](docs/complete-product-roadmap.md)
-- [80-screen inventory](docs/screen-inventory.md)
-- [Innovation and multitasking specification](docs/innovation-and-multitasking.md)
-- [Implementation plan](docs/implementation-plan.md)
-- [Architecture decisions](docs/architecture-decisions.md)
-- [Testing and release checklist](docs/testing-and-release-checklist.md)
-
-## Current starter functionality
-- Native Android app using Kotlin and Jetpack Compose.
-- Local Room database for notes.
-- Create/edit notes, local title/body search, pin/unpin and move-to-trash.
-- Core note flow designed to work without account or network access.
-
-## Planned product priorities
-1. Verify a clean build and add tests for persistence and core interactions.
-2. Expand note organization: folders, tags, archive/trash recovery, templates, autosave and drafts.
-3. Add document import/viewer handoff, reminders, share capture, accessibility and export/backup.
-4. Integrate account/sync, Google Drive and AI only with real configuration, transparent privacy behavior, and secure authorization.
-5. Add advanced multitasking such as adaptive multi-pane workspaces, a Living Knowledge Map, AI study tools, and safe action proposals.
-
-## Trust principles
-- Never claim a planned feature works until it is implemented and tested.
-- Never silently delete or overwrite data.
-- Never upload note content without a clear user action and appropriate notice.
-- Never put private service keys in the Android app.
-- Core notes should remain useful offline.
+- Local-first note creation and editing
+- Search note titles and note body text
+- Sort active notes by recent update or title
+- Pin and archive notes
+- Trash, restore, and permanently delete notes with confirmation
+- Share individual notes using Android's system share sheet
+- Export a plain-text snapshot of active, archived, and trashed notes through the Android share sheet
+- GitHub Actions workflow configured to build a debug APK
 
 ## Build
-Open this repository in a compatible Android Studio installation with JDK 17 and Android SDK platform 35 installed, then allow Gradle sync. The first build must be verified before adding more layers. A Gradle wrapper and CI build should be added as the next reliability step.
+
+The repository includes a GitHub Actions workflow at `.github/workflows/android-apk.yml`. Open the repository's **Actions** tab and inspect the latest **Android APK** run. A successful run uploads an artifact named `enotes-debug-apk`.
+
+The APK is a debug build for testing, not a signed production release.
+
+## Not implemented yet
+
+These features remain roadmap items and should not be considered available in the current prototype:
+
+- Accounts and cloud synchronization
+- Google Drive browsing and file modifications
+- AI assistant and study tools
+- Reminders and calendar integration
+- PIN/biometric app lock
+- Full backup import/restore
+- Document viewer/editor
+- Advanced tagging, folders, and knowledge map
+
+## Development priorities
+
+1. Verify compilation and fix build errors.
+2. Test note create/edit/search/archive/trash/share/export flows on an Android device.
+3. Add reliable importable backup and restore.
+4. Add document management, reminders, app security, and appearance controls.
+5. Integrate cloud sync, Drive, and configurable AI providers with explicit user consent.
+
+No API secrets should be embedded in the Android client.
