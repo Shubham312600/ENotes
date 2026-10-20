@@ -67,6 +67,14 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] AI and voice remain unavailable without configured providers/recording support. The current one-URI note model supports one attachment per note.
 - [ ] Screenshot parity remains unverified until a runtime screenshot is captured and compared with the supplied reference.
 
+## Dashboard infographic refinement (2026-10-20; CI pending)
+- [x] Framed the Quick Actions header to match the outlined section bar in the infographic; its paging arrows and Edit control remain connected to the saved carousel.
+- [x] Kept Quick Access in the matching framed section bar with paging arrows and its saved Edit controls.
+- [x] Added the infographic's four-benefit footer and slogan. Benefits reflow into two rows on narrow screens and one row when there is room; the existing “Better Notes ✦ Brighter Ideas” line remains as secondary branding.
+- [x] Checked latest pre-refinement PR CI: run #27 passed JVM unit tests, Android debug APK build, and artifact upload at `777b9eb` (artifact: 16,279,170 bytes; expires 2026-11-03).
+- [ ] Run JVM tests and Android debug build against this infographic refinement in PR CI; no local JDK, Gradle, or Android SDK is installed.
+- [ ] Capture and compare a runtime screenshot on a device/emulator; screenshot parity is not claimed.
+
 ## V1.1 — organization and documents
 - [x] Persisted folders, note assignments, active-note counts, and Room schema migrations are implemented; emulator migration verification remains pending.
 - [ ] User-defined tags with Room schema migration and data-preserving tests.
@@ -97,3 +105,4 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 
 ## Current honest release status
 The repository has a buildable **prototype**, not the complete product. The dashboard correction has a successful debug APK build and uploaded artifact. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
+

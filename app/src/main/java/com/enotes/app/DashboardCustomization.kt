@@ -171,7 +171,8 @@ internal fun QuickAccessSection(
     Card(
         Modifier.fillMaxWidth().clickable { onSelect("category:All Notes") }, shape = RoundedCornerShape(19.dp),
         border = BorderStroke(1.dp, Color(0xFFE8E5F4)),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 9.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Bolt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
@@ -240,23 +241,31 @@ private fun CarouselHeader(
 ) {
     val scope = rememberCoroutineScope()
     val visibleCount = 3
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-        Spacer(Modifier.width(9.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        IconButton(onClick = { scope.launch { onPrevious(visibleCount) } }, enabled = state.canScrollBackward, modifier = Modifier.size(40.dp)) {
-            Icon(Icons.Default.ChevronLeft, "Previous options")
-        }
-        IconButton(onClick = { scope.launch { onNext(visibleCount) } }, enabled = state.canScrollForward, modifier = Modifier.size(40.dp)) {
-            Icon(Icons.Default.ChevronRight, "More options")
-        }
-        TextButton(onClick = onEdit, contentPadding = PaddingValues(horizontal = 7.dp)) {
-            Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(3.dp))
-            Text("Edit")
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(19.dp),
+        border = BorderStroke(1.dp, Color(0xFFE8E5F4)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 5.dp, top = 7.dp, bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(26.dp))
+            Spacer(Modifier.width(9.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onClick = { scope.launch { onPrevious(visibleCount) } }, enabled = state.canScrollBackward, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.ChevronLeft, "Previous options")
+            }
+            IconButton(onClick = { scope.launch { onNext(visibleCount) } }, enabled = state.canScrollForward, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.ChevronRight, "More options")
+            }
+            TextButton(onClick = onEdit, contentPadding = PaddingValues(horizontal = 7.dp)) {
+                Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(3.dp))
+                Text("Edit")
+            }
         }
     }
 }
@@ -377,4 +386,5 @@ private fun Modifier.dashboardDragHandle(id: String, onMove: (String, Int) -> Un
         )
     }
 }
+
 

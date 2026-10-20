@@ -637,7 +637,7 @@ private fun NoteCard(
 @Composable
 private fun DashboardFooter() {
     Column(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Canvas(Modifier.fillMaxWidth().height(26.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(22.dp)) {
             val wave = Path().apply {
                 moveTo(0f, size.height)
                 cubicTo(size.width * 0.22f, size.height * 0.15f, size.width * 0.34f, size.height * 0.2f, size.width * 0.52f, size.height * 0.72f)
@@ -645,11 +645,56 @@ private fun DashboardFooter() {
                 lineTo(size.width, size.height)
                 close()
             }
-            drawPath(wave, Color(0xFFEFE8FF))
+            drawPath(wave, MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
         }
-        Text("Better Notes  ✦  Brighter Ideas", color = Color(0xFF7650C9), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-        Spacer(Modifier.height(4.dp))
-        Box(Modifier.width(62.dp).height(2.dp).background(Color(0xFFD7C7FF), RoundedCornerShape(50)))
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val compact = maxWidth < 520.dp
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+            ) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (compact) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FooterBenefit(Icons.Default.Star, "Save Time", "Get to what you need faster", Modifier.weight(1f))
+                            FooterBenefit(Icons.Default.Folder, "Stay Organized", "Keep notes neat and sorted", Modifier.weight(1f))
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FooterBenefit(Icons.Default.Bolt, "Boost Productivity", "Tools at your fingertips", Modifier.weight(1f))
+                            FooterBenefit(Icons.Default.Favorite, "Simple & Easy", "A smooth experience", Modifier.weight(1f))
+                        }
+                    } else {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FooterBenefit(Icons.Default.Star, "Save Time", "Get to what you need faster", Modifier.weight(1f))
+                            FooterBenefit(Icons.Default.Folder, "Stay Organized", "Keep notes neat and sorted", Modifier.weight(1f))
+                            FooterBenefit(Icons.Default.Bolt, "Boost Productivity", "Tools at your fingertips", Modifier.weight(1f))
+                            FooterBenefit(Icons.Default.Favorite, "Simple & Easy", "A smooth experience", Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(11.dp))
+        Text("More Control  •  More Focus  •  More You", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        Text("Better Notes  ✦  Brighter Ideas", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+        Spacer(Modifier.height(5.dp))
+        Box(Modifier.width(62.dp).height(2.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(50)))
+    }
+}
+
+@Composable
+private fun FooterBenefit(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    detail: String,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -727,3 +772,4 @@ private fun SettingRow(title: String, detail: String) {
         Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
