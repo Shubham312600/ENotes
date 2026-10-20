@@ -99,6 +99,35 @@ private fun NotesHome(vm: NotesViewModel) {
                 SettingRow("App lock", "PIN and biometric lock are not implemented yet.")
                 SettingRow("Appearance", "System theme is currently used.")
                 SettingRow("Backup and restore", "Cloud backup is not available in this build.")
+                HorizontalDivider()
+                Text("Local export", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("Share a plain-text snapshot of your notes for safekeeping. Nothing uploads automatically.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = {
+                    val allNotes = (notes + archived + trash).distinctBy { it.id }.sortedByDescending { it.updatedAt }
+                    val snapshot = buildString {
+                        appendLine("ENotes export")
+                        appendLine("Exported: " + DateFormat.getDateTimeInstance().format(Date()))
+                        appendLine()
+                        allNotes.forEach { note ->
+                            appendLine("=== " + note.title.ifBlank { "Untitled note" } + " ===")
+                            appendLine("Updated: " + DateFormat.getDateTimeInstance().format(Date(note.updatedAt)))
+                            appendLine("Status: " + when { note.deletedAt != null -> "Trash"; note.isArchived -> "Archived"; else -> "Active" })
+                            appendLine()
+                            appendLine(note.body)
+                            appendLine()
+                        }
+                    }
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "ENotes backup")
+                        putExtra(Intent.EXTRA_TEXT, snapshot)
+                    }
+                    context.startActivity(Intent.createChooser(sendIntent, "Export ENotes backup"))
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.FileDownload, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Export notes")
+                }
             }
         } else {
             Column(Modifier.fillMaxSize().padding(inset).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
