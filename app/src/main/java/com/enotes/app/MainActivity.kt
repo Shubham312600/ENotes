@@ -636,6 +636,7 @@ private fun NoteCard(
 
 @Composable
 private fun DashboardFooter() {
+    val footerAccent = MaterialTheme.colorScheme.primary
     Column(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Canvas(Modifier.fillMaxWidth().height(22.dp)) {
             val wave = Path().apply {
@@ -645,7 +646,7 @@ private fun DashboardFooter() {
                 lineTo(size.width, size.height)
                 close()
             }
-            drawPath(wave, MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+            drawPath(wave, footerAccent.copy(alpha = 0.08f))
         }
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val compact = maxWidth < 520.dp
