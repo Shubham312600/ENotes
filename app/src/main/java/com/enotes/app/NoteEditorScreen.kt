@@ -283,7 +283,7 @@ internal fun NoteEditorScreen(
                     Box(Modifier.weight(1f)) {
                         EditorMetaButton(Icons.Default.Folder, "Folder", folder ?: "None", Modifier.fillMaxWidth()) { folderMenu = true }
                         DropdownMenu(folderMenu, { folderMenu = false }) {
-                            DropdownMenuItem(text = { Text("None") }, onClick = { folder = null; folderMenu = false }) }
+                            DropdownMenuItem(text = { Text("None") }, onClick = { folder = null; folderMenu = false })
                             folders.forEach { value -> DropdownMenuItem(text = { Text(value.name) }, onClick = { folder = value.name; folderMenu = false }) }
                         }
                     }
@@ -683,3 +683,4 @@ private fun parsePastedTable(text: String): List<List<String>> {
     val width = rows.maxOfOrNull { it.size }?.coerceAtMost(12) ?: 1
     return rows.take(100).map { row -> row.take(12) + List((width - row.size).coerceAtLeast(0)) { "" } }
 }
+
