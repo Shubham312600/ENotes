@@ -3,6 +3,8 @@ package com.enotes.app
 import android.os.Bundle
 import android.content.Intent
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -29,6 +31,10 @@ import com.enotes.app.data.NotesRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     private val vm: NotesViewModel by lazy {
@@ -55,6 +61,23 @@ class NotesViewModel(private val repo: NotesRepository) : ViewModel() {
     fun archive(note: Note) { viewModelScope.launch { repo.archive(note) } }
     fun unarchive(note: Note) { viewModelScope.launch { repo.unarchive(note) } }
     fun pin(note: Note) { viewModelScope.launch { repo.togglePin(note) } }
+    fun importBackup(json: String, onResult: (String) -> Unit) { viewModelScope.launch {
+        val result = withContext(Dispatchers.IO) { runCatching {
+            val root = JSONObject(json)
+            require(root.optString("format") == "enotes-backup-v1") { "This is not a supported ENotes backup file." }
+            val array = root.getJSONArray("notes")
+            val restored = buildList {
+                for (i in 0 until array.length()) {
+                    val item = array.getJSONObject(i)
+                    add(Note(id = item.getString("id"), title = item.optString("title", "Untitled note"), body = item.optString("body", ""), createdAt = item.optLong("createdAt", System.currentTimeMillis()), updatedAt = item.optLong("updatedAt", System.currentTimeMillis()), isPinned = item.optBoolean("isPinned", false), isArchived = item.optBoolean("isArchived", false), deletedAt = if (item.isNull("deletedAt")) null else item.optLong("deletedAt")))
+                }
+            }
+            require(restored.size <= 100000) { "Backup contains too many notes." }
+            repo.importNotes(restored)
+            "Restored ${restored.size} notes. Existing notes with matching IDs were updated."
+        }.getOrElse { "Could not restore backup: ${it.message ?: "invalid file"}" } }
+        onResult(result)
+    } }
 }
 
 private enum class Tab { NOTES, ARCHIVE, TRASH, SETTINGS }
@@ -70,6 +93,15 @@ private fun NotesHome(vm: NotesViewModel) {
     var query by remember { mutableStateOf("") }
     var sortByTitle by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var backupMessage by remember { mutableStateOf("") }
+    val importBackupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+                val json = withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: error("Unable to open file") } }
+                json.onSuccess { vm.importBackup(it) { backupMessage = it } }.onFailure { backupMessage = "Could not read backup: ${it.message}" }
+            }
+        }
+    }
     var editor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Note?>(null) }
     var deleteTarget by remember { mutableStateOf<Note?>(null) }
@@ -98,36 +130,26 @@ private fun NotesHome(vm: NotesViewModel) {
                 SettingRow("AI assistant", "Requires a configured provider. No API key is embedded.")
                 SettingRow("App lock", "PIN and biometric lock are not implemented yet.")
                 SettingRow("Appearance", "System theme is currently used.")
-                SettingRow("Backup and restore", "Cloud backup is not available in this build.")
+                SettingRow("Backup and restore", "Create an importable JSON backup or restore one from this device. Backups stay under your control.")
                 HorizontalDivider()
-                Text("Local export", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Share a plain-text snapshot of your notes for safekeeping. Nothing uploads automatically.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Backup and restore", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("Export preserves note IDs, text, timestamps, pin/archive status, and trash state. Import merges by ID; matching notes are replaced.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = {
                     val allNotes = (notes + archived + trash).distinctBy { it.id }.sortedByDescending { it.updatedAt }
-                    val snapshot = buildString {
-                        appendLine("ENotes export")
-                        appendLine("Exported: " + DateFormat.getDateTimeInstance().format(Date()))
-                        appendLine()
-                        allNotes.forEach { note ->
-                            appendLine("=== " + note.title.ifBlank { "Untitled note" } + " ===")
-                            appendLine("Updated: " + DateFormat.getDateTimeInstance().format(Date(note.updatedAt)))
-                            appendLine("Status: " + when { note.deletedAt != null -> "Trash"; note.isArchived -> "Archived"; else -> "Active" })
-                            appendLine()
-                            appendLine(note.body)
-                            appendLine()
-                        }
-                    }
-                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "ENotes backup")
-                        putExtra(Intent.EXTRA_TEXT, snapshot)
-                    }
-                    context.startActivity(Intent.createChooser(sendIntent, "Export ENotes backup"))
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.FileDownload, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Export notes")
-                }
+                    val array = JSONArray()
+                    allNotes.forEach { note -> array.put(JSONObject().apply {
+                        put("id", note.id); put("title", note.title); put("body", note.body)
+                        put("createdAt", note.createdAt); put("updatedAt", note.updatedAt)
+                        put("isPinned", note.isPinned); put("isArchived", note.isArchived)
+                        put("deletedAt", note.deletedAt ?: JSONObject.NULL)
+                    }) }
+                    val backup = JSONObject().apply { put("format", "enotes-backup-v1"); put("exportedAt", System.currentTimeMillis()); put("notes", array) }.toString(2)
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply { type = "application/json"; putExtra(Intent.EXTRA_SUBJECT, "ENotes backup.json"); putExtra(Intent.EXTRA_TEXT, backup) }
+                    context.startActivity(Intent.createChooser(sendIntent, "Save ENotes backup"))
+                    backupMessage = "Choose an app to save or send your JSON backup."
+                }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.FileDownload, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Export backup") }
+                OutlinedButton(onClick = { importBackupLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Restore, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Import / restore backup") }
+                if (backupMessage.isNotBlank()) Text(backupMessage, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
             }
         } else {
             Column(Modifier.fillMaxSize().padding(inset).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
