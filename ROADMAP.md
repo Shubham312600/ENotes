@@ -76,6 +76,12 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [x] CI run #29 passed JVM tests, Android debug APK build, and artifact upload for the fix at `969c20c` (artifact: 16,285,082 bytes; expires 2026-11-03). This workstation has no local JDK, Gradle, or Android SDK.
 - [ ] Capture and compare a runtime screenshot on a device/emulator; screenshot parity is not claimed.
 
+## Dashboard header alignment follow-up (2026-10-20; CI pending)
+- [x] Removed the surrounding header cards and borders from Quick Actions and Quick Access to match the latest screenshot; the individual action and category tiles retain their own styling.
+- [x] Set Quick Access controls to previous arrow, next arrow, then Edit at the right end, matching the reference. Quick Actions keeps the same arrows-before-Edit order.
+- [ ] Run unit tests and Android debug build for this follow-up in PR CI; local Android build tools are unavailable.
+- [ ] Runtime screenshot comparison remains pending; no emulator is configured here.
+
 ## V1.1 — organization and documents
 - [x] Persisted folders, note assignments, active-note counts, and Room schema migrations are implemented; emulator migration verification remains pending.
 - [ ] User-defined tags with Room schema migration and data-preserving tests.
