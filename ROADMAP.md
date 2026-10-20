@@ -73,7 +73,7 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [x] Added the infographic's four-benefit footer and slogan. Benefits reflow into two rows on narrow screens and one row when there is room; the existing “Better Notes ✦ Brighter Ideas” line remains as secondary branding.
 - [x] Checked latest pre-refinement PR CI: run #27 passed JVM unit tests, Android debug APK build, and artifact upload at `777b9eb` (artifact: 16,279,170 bytes; expires 2026-11-03).
 - [x] CI run #28 caught a Kotlin compile error because the wave color was read inside the Canvas draw callback; moved the theme color lookup into composable scope.
-- [ ] Rerun JVM tests and Android debug build against the fix in PR CI; no local JDK, Gradle, or Android SDK is installed.
+- [x] CI run #29 passed JVM tests, Android debug APK build, and artifact upload for the fix at `969c20c` (artifact: 16,285,082 bytes; expires 2026-11-03). This workstation has no local JDK, Gradle, or Android SDK.
 - [ ] Capture and compare a runtime screenshot on a device/emulator; screenshot parity is not claimed.
 
 ## V1.1 — organization and documents
