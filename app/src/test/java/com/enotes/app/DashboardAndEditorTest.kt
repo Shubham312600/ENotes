@@ -26,4 +26,12 @@ class DashboardAndEditorTest {
     fun listMarkerStartsAtTheCurrentLineAndKeepsCursorAfterMarker() {
         assertEquals(TextEditResult("First\n- second", 11, 11), prefixCurrentLine("First\nsecond", 9, "- "))
     }
+
+    @Test
+    fun videoAspectRatioUsesPortraitLandscapeAndRotationMetadata() {
+        assertEquals(9f / 16f, normalizedVideoAspectRatio(1080f, 1920f, 0), 0.001f)
+        assertEquals(16f / 9f, normalizedVideoAspectRatio(1080f, 1920f, 90), 0.001f)
+        assertEquals(16f / 9f, normalizedVideoAspectRatio(null, 1920f, 0), 0.001f)
+    }
 }
+

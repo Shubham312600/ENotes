@@ -128,6 +128,11 @@ private enum class Tab { NOTES, ARCHIVE, TRASH, SETTINGS, MORE }
 @Composable
 private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: (String) -> Unit) {
     val context = LocalContext.current
+    val darkEditor = when (themeMode) {
+        "light" -> false
+        "dark" -> true
+        else -> isSystemInDarkTheme()
+    }
     val dashboardStore = remember { context.getSharedPreferences("enotes_dashboard", android.content.Context.MODE_PRIVATE) }
     var dashboardPreferences by remember { mutableStateOf(DashboardPreferences.decode(dashboardStore.getString("customization", null))) }
     val notes by vm.notes.collectAsStateWithLifecycle()
@@ -231,6 +236,7 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
             NoteEditorScreen(
                 modifier = Modifier.fillMaxSize().padding(inset),
                 note = editing,
+                darkTheme = darkEditor,
                 folders = folders,
                 pickedBlock = pickedEditorBlock,
                 onConsumePickedBlock = { pickedEditorBlock = null },
@@ -794,3 +800,4 @@ private fun SettingRow(title: String, detail: String) {
         Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+

@@ -95,6 +95,15 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] Check migration, media picking/playback, and the editor layout on a device or emulator; none is available here. Screenshot parity is not claimed.
 - [ ] Audio files can be embedded and played; live microphone recording and reminder notification delivery are still not implemented.
 
+## Media viewer and theme correction (2026-10-20; CI pending)
+- [x] Image preview and the view control now open an in-app full-screen image viewer rather than relying on an external image app.
+- [x] Video cards and their full-screen viewer size themselves from video width/height/rotation metadata, with a safe 16:9 fallback; video cards have the same view control as images.
+- [x] Reduced the empty writing area when a note already contains media, so embedded blocks appear near the top of the editor.
+- [x] Replaced the sheet's wrapping “Delete column” label with a compact accessible delete icon and made the sheet toolbar horizontally scrollable on narrow screens.
+- [x] Applied the selected Light, Dark, or System appearance to the editor, media cards/viewer, audio player, sheet cells, and skin colors.
+- [x] Added a unit test for portrait, landscape, rotated, and missing video metadata aspect ratios.
+- [ ] CI unit tests, Android debug build, and APK upload are pending. Device playback, in-app image opening, and theme switching still need runtime verification.
+
 ## V1.1 — organization and documents
 - [x] Persisted folders, note assignments, active-note counts, and Room schema migrations are implemented; emulator migration verification remains pending.
 - [ ] User-defined tags with Room schema migration and data-preserving tests.

@@ -3,6 +3,7 @@ package com.enotes.app
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
@@ -74,18 +76,72 @@ internal data class EditorSaveData(
     val richContentJson: String
 )
 
-private val editorBg = Color(0xFF03050C)
-private val editorPanel = Color(0xFF090E19)
-private val editorLine = Color(0xFF27283A)
-private val editorPurple = Color(0xFFD65BFF)
-private val editorBlue = Color(0xFF48A5FF)
-private val editorGold = Color(0xFFFFD45B)
+private data class EditorPalette(
+    val background: Color,
+    val panel: Color,
+    val line: Color,
+    val purple: Color,
+    val blue: Color,
+    val gold: Color,
+    val text: Color,
+    val secondaryText: Color,
+    val mutedText: Color,
+    val placeholder: Color,
+    val canvas: Color,
+    val field: Color,
+    val dialog: Color,
+    val mediaCanvas: Color,
+    val audioSurface: Color,
+    val cell: Color,
+    val selectedCell: Color,
+    val cellLine: Color
+) {
+    companion object {
+        val Dark = EditorPalette(
+            background = Color(0xFF03050C), panel = Color(0xFF090E19), line = Color(0xFF27283A),
+            purple = Color(0xFFD65BFF), blue = Color(0xFF48A5FF), gold = Color(0xFFFFD45B),
+            text = Color(0xFFF4F3FA), secondaryText = Color(0xFFCBD1E0), mutedText = Color(0xFF9EA6BA),
+            placeholder = Color(0xFF777F95), canvas = Color(0xFF050914), field = Color(0xFF080D17),
+            dialog = Color(0xFF101625), mediaCanvas = Color(0xFF02040A), audioSurface = Color(0xFF081426),
+            cell = Color(0xFF0D1420), selectedCell = Color(0xFF21172C), cellLine = Color(0xFF343B4C)
+        )
+        val Light = EditorPalette(
+            background = Color(0xFFFBF9FF), panel = Color.White, line = Color(0xFFE4E1EE),
+            purple = Color(0xFF5935E8), blue = Color(0xFF2876E8), gold = Color(0xFF9A6900),
+            text = Color(0xFF202033), secondaryText = Color(0xFF4D4B5B), mutedText = Color(0xFF777486),
+            placeholder = Color(0xFF858294), canvas = Color.White, field = Color(0xFFFCFBFF),
+            dialog = Color.White, mediaCanvas = Color(0xFFF3F2F8), audioSurface = Color(0xFFF3F5FB),
+            cell = Color.White, selectedCell = Color(0xFFF0EAFE), cellLine = Color(0xFFE4E1EE)
+        )
+    }
+}
+
+private val LocalEditorPalette = staticCompositionLocalOf { EditorPalette.Dark }
+private val editorBg: Color @Composable get() = LocalEditorPalette.current.background
+private val editorPanel: Color @Composable get() = LocalEditorPalette.current.panel
+private val editorLine: Color @Composable get() = LocalEditorPalette.current.line
+private val editorPurple: Color @Composable get() = LocalEditorPalette.current.purple
+private val editorBlue: Color @Composable get() = LocalEditorPalette.current.blue
+private val editorGold: Color @Composable get() = LocalEditorPalette.current.gold
+private val editorText: Color @Composable get() = LocalEditorPalette.current.text
+private val editorSecondary: Color @Composable get() = LocalEditorPalette.current.secondaryText
+private val editorMuted: Color @Composable get() = LocalEditorPalette.current.mutedText
+private val editorPlaceholder: Color @Composable get() = LocalEditorPalette.current.placeholder
+private val editorCanvas: Color @Composable get() = LocalEditorPalette.current.canvas
+private val editorField: Color @Composable get() = LocalEditorPalette.current.field
+private val editorDialog: Color @Composable get() = LocalEditorPalette.current.dialog
+private val editorMediaCanvas: Color @Composable get() = LocalEditorPalette.current.mediaCanvas
+private val editorAudioSurface: Color @Composable get() = LocalEditorPalette.current.audioSurface
+private val editorCell: Color @Composable get() = LocalEditorPalette.current.cell
+private val editorSelectedCell: Color @Composable get() = LocalEditorPalette.current.selectedCell
+private val editorCellLine: Color @Composable get() = LocalEditorPalette.current.cellLine
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun NoteEditorScreen(
     modifier: Modifier = Modifier,
     note: Note?,
+    darkTheme: Boolean,
     folders: List<NoteFolder>,
     pickedBlock: RichContentBlock?,
     onConsumePickedBlock: () -> Unit,
@@ -167,11 +223,17 @@ internal fun NoteEditorScreen(
 
     BackHandler(enabled = true, onBack = ::requestDismiss)
 
-    MaterialTheme(colorScheme = darkColorScheme(
-        primary = editorPurple, secondary = editorBlue, background = editorBg, surface = editorPanel,
-        onPrimary = Color.White, onBackground = Color(0xFFF4F3FA), onSurface = Color(0xFFF4F3FA),
-        onSurfaceVariant = Color(0xFF9EA6BA), outline = Color(0xFF55536B)
-    )) {
+    val palette = if (darkTheme) EditorPalette.Dark else EditorPalette.Light
+    CompositionLocalProvider(LocalEditorPalette provides palette) {
+      MaterialTheme(colorScheme = if (darkTheme) darkColorScheme(
+        primary = palette.purple, secondary = palette.blue, background = palette.background, surface = palette.panel,
+        onPrimary = Color.White, onBackground = palette.text, onSurface = palette.text,
+        onSurfaceVariant = palette.secondaryText, outline = palette.line
+      ) else lightColorScheme(
+        primary = palette.purple, secondary = palette.blue, background = palette.background, surface = palette.panel,
+        onPrimary = Color.White, onBackground = palette.text, onSurface = palette.text,
+        onSurfaceVariant = palette.secondaryText, outline = palette.line
+      )) {
         Column(modifier.fillMaxSize().imePadding().background(editorBg)) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
@@ -221,17 +283,17 @@ internal fun NoteEditorScreen(
                     Modifier.fillMaxWidth().border(1.dp, editorLine, RoundedCornerShape(14.dp)).background(editorPanel, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.CalendarMonth, null, tint = Color(0xFF8F94AC), modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.CalendarMonth, null, tint = editorMuted, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(9.dp))
-                    Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(note?.updatedAt ?: System.currentTimeMillis())), color = Color(0xFFBBC2D4), style = MaterialTheme.typography.labelMedium)
+                    Text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(note?.updatedAt ?: System.currentTimeMillis())), color = editorSecondary, style = MaterialTheme.typography.labelMedium)
                     Spacer(Modifier.width(8.dp))
                     Text("• ${body.text.length} characters", color = editorBlue, style = MaterialTheme.typography.labelMedium)
                     Spacer(Modifier.weight(1f))
-                    Text("${body.text.trim().split(Regex("\\s+")).count(String::isNotBlank)} words", color = Color(0xFF8F94AC), style = MaterialTheme.typography.labelSmall)
+                    Text("${body.text.trim().split(Regex("\\s+")).count(String::isNotBlank)} words", color = editorMuted, style = MaterialTheme.typography.labelSmall)
                 }
 
                 Column(
-                    Modifier.fillMaxWidth().heightIn(min = 300.dp).border(1.dp, editorLine, RoundedCornerShape(18.dp)).background(Color(0xFF050914), RoundedCornerShape(18.dp)).padding(14.dp),
+                    Modifier.fillMaxWidth().heightIn(min = if (blocks.isEmpty()) 300.dp else 112.dp).border(1.dp, editorLine, RoundedCornerShape(18.dp)).background(editorCanvas, RoundedCornerShape(18.dp)).padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     BasicTextField(
@@ -242,11 +304,11 @@ internal fun NoteEditorScreen(
                             redoStack.clear()
                             body = next
                         },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp).focusRequester(bodyFocus),
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFFE7EAF3), lineHeight = 25.sp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = if (blocks.isEmpty()) 180.dp else 56.dp).focusRequester(bodyFocus),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = editorText, lineHeight = 25.sp),
                         cursorBrush = SolidColor(editorPurple),
                         decorationBox = { inner -> Box {
-                            if (body.text.isBlank()) Text("Write something about your note…", color = Color(0xFF777F95), style = MaterialTheme.typography.bodyLarge)
+                            if (body.text.isBlank()) Text("Write something about your note…", color = editorPlaceholder, style = MaterialTheme.typography.bodyLarge)
                             inner()
                         } }
                     )
@@ -269,7 +331,7 @@ internal fun NoteEditorScreen(
                         }
                     }
                     if (blocks.isEmpty() && body.text.isBlank()) {
-                        Text("Use the toolbar below to add text, images, video, audio, or a sheet.", color = Color(0xFF646D84), style = MaterialTheme.typography.bodySmall)
+                        Text("Use the toolbar below to add text, images, video, audio, or a sheet.", color = editorMuted, style = MaterialTheme.typography.bodySmall)
                     }
                 }
 
@@ -313,15 +375,15 @@ internal fun NoteEditorScreen(
                 Surface(Modifier.fillMaxWidth(), color = editorPanel, shape = RoundedCornerShape(15.dp), border = BorderStroke(1.dp, editorLine)) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.PushPin, null, tint = editorPurple, modifier = Modifier.size(19.dp))
-                        Text("Pin to top", Modifier.weight(1f).padding(start = 8.dp), color = Color(0xFFE4E6EE), style = MaterialTheme.typography.bodyMedium)
+                        Text("Pin to top", Modifier.weight(1f).padding(start = 8.dp), color = editorText, style = MaterialTheme.typography.bodyMedium)
                         Switch(checked = pinned, onCheckedChange = { pinned = it })
                     }
                 }
                 Column(Modifier.fillMaxWidth().border(1.dp, editorLine, RoundedCornerShape(15.dp)).background(editorPanel, RoundedCornerShape(15.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(Modifier.fillMaxWidth().clickable { showDetails = !showDetails }, verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Palette, null, tint = editorPurple)
-                        Text("Color / Label", Modifier.weight(1f).padding(start = 8.dp), color = Color(0xFFE4E6EE), fontWeight = FontWeight.SemiBold)
-                        Icon(if (showDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, tint = Color(0xFF9EA6BA))
+                        Text("Color / Label", Modifier.weight(1f).padding(start = 8.dp), color = editorText, fontWeight = FontWeight.SemiBold)
+                        Icon(if (showDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, tint = editorMuted)
                     }
                     if (showDetails) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -343,7 +405,7 @@ internal fun NoteEditorScreen(
             }
 
             Row(
-                Modifier.fillMaxWidth().border(BorderStroke(1.dp, editorLine), RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(Color(0xFF050914), RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).padding(horizontal = 3.dp, vertical = 7.dp),
+                Modifier.fillMaxWidth().border(BorderStroke(1.dp, editorLine), RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(editorCanvas, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).padding(horizontal = 3.dp, vertical = 7.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -383,8 +445,8 @@ internal fun NoteEditorScreen(
             val target = skinTarget
             AlertDialog(
                 onDismissRequest = { skinTarget = null },
-                containerColor = Color(0xFF101625),
-                title = { Text("Choose sheet skin", color = Color.White) },
+                containerColor = editorDialog,
+                title = { Text("Choose sheet skin", color = editorText) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("plain" to "Midnight", "floral" to "Blossom", "leaves" to "Sage", "warm" to "Coral", "sea" to "Ocean").forEach { (key, name) ->
@@ -393,7 +455,7 @@ internal fun NoteEditorScreen(
                                 skinTarget = null
                             }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(24.dp).background(skinColor(key), RoundedCornerShape(6.dp)).border(1.dp, editorPurple.copy(alpha = .7f), RoundedCornerShape(6.dp)))
-                                Text(name, Modifier.padding(start = 10.dp), color = Color(0xFFEAECF3))
+                                Text(name, Modifier.padding(start = 10.dp), color = editorText)
                                 Spacer(Modifier.weight(1f))
                                 if (target?.let { id -> blocks.firstOrNull { it.id == id }?.skin == key } == true) Icon(Icons.Default.Check, null, tint = editorPurple)
                             }
@@ -405,19 +467,20 @@ internal fun NoteEditorScreen(
         }
         if (discardConfirmation) AlertDialog(
             onDismissRequest = { discardConfirmation = false },
-            containerColor = Color(0xFF101625),
-            title = { Text("Discard unsaved changes?", color = Color.White) },
-            text = { Text("Your changes have not been saved.", color = Color(0xFFCBD1E0)) },
+            containerColor = editorDialog,
+            title = { Text("Discard unsaved changes?", color = editorText) },
+            text = { Text("Your changes have not been saved.", color = editorSecondary) },
             confirmButton = { TextButton(onClick = { discardConfirmation = false; onDismiss() }) { Text("Discard") } },
             dismissButton = { TextButton(onClick = { discardConfirmation = false }) { Text("Keep editing") } }
         )
         if (reminderMessage) AlertDialog(
             onDismissRequest = { reminderMessage = false },
-            containerColor = Color(0xFF101625),
-            title = { Text("Reminder saved", color = Color.White) },
-            text = { Text("The reminder time is stored with the note. Notification delivery is not enabled in this build.", color = Color(0xFFCBD1E0)) },
+            containerColor = editorDialog,
+            title = { Text("Reminder saved", color = editorText) },
+            text = { Text("The reminder time is stored with the note. Notification delivery is not enabled in this build.", color = editorSecondary) },
             confirmButton = { TextButton(onClick = { reminderMessage = false }) { Text("OK") } }
         )
+      }
     }
 }
 
@@ -434,7 +497,7 @@ private fun EditorTopButton(icon: androidx.compose.ui.graphics.vector.ImageVecto
 private fun EditorToolbarItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color, onClick: () -> Unit) {
     Column(Modifier.width(55.dp).clickable(onClick = onClick).padding(vertical = 3.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Icon(icon, label, tint = tint, modifier = Modifier.size(25.dp))
-        Text(label, color = Color(0xFFE3E5ED), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        Text(label, color = editorText, style = MaterialTheme.typography.labelSmall, maxLines = 1)
     }
 }
 
@@ -444,10 +507,10 @@ private fun EditorMetaButton(icon: androidx.compose.ui.graphics.vector.ImageVect
         Row(Modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = editorPurple, modifier = Modifier.size(19.dp))
             Column(Modifier.weight(1f).padding(start = 7.dp)) {
-                Text(label, color = Color(0xFF9EA6BA), style = MaterialTheme.typography.labelSmall)
-                Text(value, color = Color(0xFFE5E7EF), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(label, color = editorMuted, style = MaterialTheme.typography.labelSmall)
+                Text(value, color = editorText, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Icon(Icons.Default.ArrowDropDown, null, tint = Color(0xFF9EA6BA), modifier = Modifier.size(19.dp))
+            Icon(Icons.Default.ArrowDropDown, null, tint = editorMuted, modifier = Modifier.size(19.dp))
         }
     }
 }
@@ -462,6 +525,7 @@ private fun RichContentCard(
     onPaste: () -> Unit
 ) {
     val bg = skinColor(block.skin)
+    var viewerOpen by remember(block.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().border(1.dp, editorLine, RoundedCornerShape(16.dp)).background(bg, RoundedCornerShape(16.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(when (block.kind) {
@@ -471,13 +535,17 @@ private fun RichContentCard(
                 "sheet" -> Icons.Default.TableChart
                 else -> Icons.Default.InsertDriveFile
             }, null, tint = if (block.kind == "video") editorBlue else editorPurple)
-            Text(when (block.kind) { "image" -> "Image"; "video" -> "Video"; "audio" -> "Audio"; "sheet" -> "Sheet"; else -> "Attachment" }, Modifier.weight(1f).padding(start = 8.dp), color = Color(0xFFE7EAF3), fontWeight = FontWeight.SemiBold)
+            Text(when (block.kind) { "image" -> "Image"; "video" -> "Video"; "audio" -> "Audio"; "sheet" -> "Sheet"; else -> "Attachment" }, Modifier.weight(1f).padding(start = 8.dp), color = editorText, fontWeight = FontWeight.SemiBold)
             if (block.kind == "sheet") TextButton(onClick = onSkin, contentPadding = PaddingValues(horizontal = 8.dp)) { Icon(Icons.Default.Palette, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(4.dp)); Text("Skins") }
-            if (block.uri != null) IconButton(onClick = onOpen, modifier = Modifier.size(34.dp)) { Icon(Icons.Default.OpenInNew, "Open media", tint = editorBlue, modifier = Modifier.size(18.dp)) }
-            IconButton(onClick = onRemove, modifier = Modifier.size(34.dp)) { Icon(Icons.Default.Close, "Remove content", tint = Color(0xFFAAB1C1), modifier = Modifier.size(18.dp)) }
+            if (block.uri != null && block.kind in setOf("image", "video")) IconButton(onClick = { viewerOpen = true }, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Default.OpenInFull, if (block.kind == "image") "View image" else "View video", tint = editorBlue, modifier = Modifier.size(18.dp))
+            } else if (block.uri != null) IconButton(onClick = onOpen, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Default.OpenInNew, "Open media", tint = editorBlue, modifier = Modifier.size(18.dp))
+            }
+            IconButton(onClick = onRemove, modifier = Modifier.size(34.dp)) { Icon(Icons.Default.Close, "Remove content", tint = editorMuted, modifier = Modifier.size(18.dp)) }
         }
 
-        if (block.kind == "image" && block.uri != null) EmbeddedImage(block.uri)
+        if (block.kind == "image" && block.uri != null) EmbeddedImage(block.uri) { viewerOpen = true }
         if (block.kind == "video" && block.uri != null) EmbeddedVideo(block.uri)
         if (block.kind == "audio" && block.uri != null) EmbeddedAudio(block.uri, block.title)
 
@@ -502,8 +570,11 @@ private fun RichContentCard(
         if (block.kind == "sheet") {
             SheetGrid(block = block, onChange = onChange, onPaste = onPaste)
         } else if (block.uri != null) {
-            Text("${block.mimeType.ifBlank { block.kind }} · linked from this device", color = Color(0xFF9EA6BA), style = MaterialTheme.typography.labelSmall)
+            Text("${block.mimeType.ifBlank { block.kind }} · linked from this device", color = editorMuted, style = MaterialTheme.typography.labelSmall)
         }
+    }
+    if (viewerOpen && block.uri != null && block.kind in setOf("image", "video")) {
+        MediaViewerDialog(block, onDismiss = { viewerOpen = false })
     }
 }
 
@@ -513,20 +584,22 @@ private fun SheetGrid(block: RichContentBlock, onChange: (RichContentBlock) -> U
     val columns = maxOf(1, block.rows.maxOfOrNull { it.size } ?: 1)
     val rows = if (block.rows.isEmpty()) List(4) { List(3) { "" } } else block.rows.map { row -> row + List((columns - row.size).coerceAtLeast(0)) { "" } }
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = onPaste, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Icon(Icons.Default.ContentPaste, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Paste") }
             OutlinedButton(onClick = { onChange(block.copy(rows = rows + listOf(List(columns) { "" }))) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Text("Row") }
             OutlinedButton(onClick = {
                 onChange(block.copy(rows = rows.map { it + "" }))
                 selectedColumn = columns
             }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Icon(Icons.Default.ViewColumn, null, modifier = Modifier.size(16.dp)); Text("Add column") }
-            OutlinedButton(onClick = {
+            IconButton(
+                onClick = {
                 if (columns > 1) {
                     val remove = selectedColumn.coerceIn(0, columns - 1)
                     onChange(block.copy(rows = rows.map { row -> row.filterIndexed { index, _ -> index != remove } }))
                     selectedColumn = (remove - 1).coerceAtLeast(0)
                 }
-            }, enabled = columns > 1, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Icon(Icons.Default.DeleteOutline, null, modifier = Modifier.size(16.dp)); Text("Delete column") }
+            }, enabled = columns > 1, modifier = Modifier.size(40.dp)
+            ) { Icon(Icons.Default.DeleteOutline, "Delete selected column", tint = if (columns > 1) editorPurple else editorMuted, modifier = Modifier.size(19.dp)) }
         }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             repeat(columns) { index ->
@@ -545,10 +618,10 @@ private fun SheetGrid(block: RichContentBlock, onChange: (RichContentBlock) -> U
                                 }
                                 onChange(block.copy(rows = changed))
                             },
-                            modifier = Modifier.width(112.dp).heightIn(min = 40.dp).background(if (selectedColumn == columnIndex) Color(0xFF21172C) else Color(0xFF0D1420)).border(1.dp, if (selectedColumn == columnIndex) editorPurple.copy(alpha = .5f) else Color(0xFF343B4C)).padding(horizontal = 7.dp, vertical = 8.dp),
-                            textStyle = MaterialTheme.typography.bodySmall.copy(color = Color(0xFFE8EAF2)),
+                            modifier = Modifier.width(112.dp).heightIn(min = 40.dp).background(if (selectedColumn == columnIndex) editorSelectedCell else editorCell).border(1.dp, if (selectedColumn == columnIndex) editorPurple.copy(alpha = .5f) else editorCellLine).padding(horizontal = 7.dp, vertical = 8.dp),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(color = editorText),
                             cursorBrush = SolidColor(editorPurple),
-                            decorationBox = { inner -> Box { if (value.isBlank()) Text(if (rowIndex == 0) "Header" else "Cell", color = Color(0xFF687188), style = MaterialTheme.typography.labelSmall); inner() } }
+                            decorationBox = { inner -> Box { if (value.isBlank()) Text(if (rowIndex == 0) "Header" else "Cell", color = editorMuted, style = MaterialTheme.typography.labelSmall); inner() } }
                         )
                     }
                 }
@@ -558,13 +631,13 @@ private fun SheetGrid(block: RichContentBlock, onChange: (RichContentBlock) -> U
 }
 
 @Composable
-private fun EmbeddedImage(uriText: String) {
+private fun EmbeddedImage(uriText: String, onOpen: () -> Unit) {
     val context = LocalContext.current
     val image by produceImage(uriText, context)
     if (image != null) {
-        Image(image!!, contentDescription = "Embedded image", modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp).background(Color(0xFF02040A), RoundedCornerShape(10.dp)), contentScale = ContentScale.Fit)
+        Image(image!!, contentDescription = "View embedded image", modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).clip(RoundedCornerShape(10.dp)).background(editorMediaCanvas).clickable(onClick = onOpen), contentScale = ContentScale.Fit)
     } else {
-        Box(Modifier.fillMaxWidth().height(96.dp).background(Color(0xFF050914), RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Default.Image, "Image preview", tint = editorPurple, modifier = Modifier.size(36.dp)) }
+        Box(Modifier.fillMaxWidth().height(96.dp).clip(RoundedCornerShape(10.dp)).background(editorCanvas).clickable(onClick = onOpen), contentAlignment = Alignment.Center) { Icon(Icons.Default.Image, "Image preview unavailable; open viewer", tint = editorPurple, modifier = Modifier.size(36.dp)) }
     }
 }
 
@@ -588,18 +661,78 @@ private fun produceImage(uriText: String, context: Context): State<ImageBitmap?>
 
 @Composable
 private fun EmbeddedVideo(uriText: String) {
+    val ratio = rememberVideoAspectRatio(uriText)
     AndroidView(
-        modifier = Modifier.fillMaxWidth().height(205.dp).background(Color.Black, RoundedCornerShape(12.dp)),
-        factory = { ctx ->
-            VideoView(ctx).apply {
-                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                setVideoURI(Uri.parse(uriText))
-                val controller = MediaController(ctx)
-                controller.setAnchorView(this)
-                setMediaController(controller)
+        modifier = Modifier.fillMaxWidth().aspectRatio(ratio).clip(RoundedCornerShape(12.dp)).background(Color.Black),
+        factory = { ctx -> createVideoView(ctx, uriText, autoPlay = false) }
+    )
+}
+
+@Composable
+private fun rememberVideoAspectRatio(uriText: String): Float {
+    val context = LocalContext.current
+    val ratio by produceState(initialValue = 16f / 9f, key1 = uriText) {
+        value = withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            runCatching {
+                retriever.setDataSource(context, Uri.parse(uriText))
+                val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull()
+                val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull()
+                val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                normalizedVideoAspectRatio(width, height, rotation)
+            }.getOrDefault(16f / 9f).also { runCatching { retriever.release() } }
+        }
+    }
+    return ratio
+}
+
+internal fun normalizedVideoAspectRatio(width: Float?, height: Float?, rotationDegrees: Int): Float {
+    if (width == null || height == null || !width.isFinite() || !height.isFinite() || width <= 0f || height <= 0f) {
+        return 16f / 9f
+    }
+    val rotation = ((rotationDegrees % 360) + 360) % 360
+    val aspect = if (rotation == 90 || rotation == 270) height / width else width / height
+    return aspect.coerceIn(0.25f, 4f)
+}
+
+private fun createVideoView(context: Context, uriText: String, autoPlay: Boolean): VideoView {
+    val video = VideoView(context)
+    video.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+    video.setMediaController(MediaController(context).apply { setAnchorView(video) })
+    video.setOnPreparedListener { if (autoPlay) video.start() }
+    video.setVideoURI(Uri.parse(uriText))
+    return video
+}
+
+@Composable
+private fun MediaViewerDialog(block: RichContentBlock, onDismiss: () -> Unit) {
+    val uriText = block.uri ?: return
+    val ratio = if (block.kind == "video") rememberVideoAspectRatio(uriText) else 1f
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(editorBg)) {
+            if (block.kind == "image") {
+                val context = LocalContext.current
+                val image by produceImage(uriText, context)
+                if (image != null) {
+                    Image(image!!, contentDescription = "Full-screen image", modifier = Modifier.fillMaxSize().padding(20.dp), contentScale = ContentScale.Fit)
+                } else {
+                    Text("This image could not be previewed on this device.", Modifier.align(Alignment.Center).padding(24.dp), color = editorText)
+                }
+            } else {
+                val availableWidth = (maxWidth - 24.dp).coerceAtLeast(1.dp)
+                val availableHeight = (maxHeight - 72.dp).coerceAtLeast(1.dp)
+                val videoWidth = minOf(availableWidth, availableHeight * ratio)
+                val videoHeight = videoWidth / ratio
+                AndroidView(
+                    modifier = Modifier.size(videoWidth, videoHeight).align(Alignment.Center).background(Color.Black),
+                    factory = { context -> createVideoView(context, uriText, autoPlay = true) }
+                )
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).size(48.dp).background(editorPanel.copy(alpha = .9f), CircleShape)) {
+                Icon(Icons.Default.Close, "Close media viewer", tint = editorText)
             }
         }
-    )
+    }
 }
 
 @Composable
@@ -610,7 +743,7 @@ private fun EmbeddedAudio(uriText: String, title: String) {
     var loading by remember(uriText) { mutableStateOf(false) }
     var failed by remember(uriText) { mutableStateOf(false) }
     DisposableEffect(uriText) { onDispose { runCatching { player?.release() }; player = null } }
-    Row(Modifier.fillMaxWidth().background(Color(0xFF081426), RoundedCornerShape(12.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().background(editorAudioSurface, RoundedCornerShape(12.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = {
             if (playing) {
                 player?.pause(); playing = false
@@ -631,8 +764,8 @@ private fun EmbeddedAudio(uriText: String, title: String) {
             }
         }) { Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "Pause audio" else "Play audio", tint = editorBlue, modifier = Modifier.size(30.dp)) }
         Column(Modifier.weight(1f)) {
-            Text(title.ifBlank { "Audio attachment" }, color = Color(0xFFE8EBF4), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
-            Text(when { loading -> "Loading audio…"; failed -> "This audio could not be played here."; playing -> "Playing"; else -> "Tap play to listen" }, color = Color(0xFF9EA6BA), style = MaterialTheme.typography.labelSmall)
+            Text(title.ifBlank { "Audio attachment" }, color = editorText, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+            Text(when { loading -> "Loading audio…"; failed -> "This audio could not be played here."; playing -> "Playing"; else -> "Tap play to listen" }, color = editorMuted, style = MaterialTheme.typography.labelSmall)
         }
         Icon(Icons.Default.GraphicEq, null, tint = editorPurple)
     }
@@ -640,10 +773,10 @@ private fun EmbeddedAudio(uriText: String, title: String) {
 
 @Composable
 private fun editorFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = Color(0xFFE7EAF3), unfocusedTextColor = Color(0xFFE7EAF3),
+    focusedTextColor = editorText, unfocusedTextColor = editorText,
     focusedBorderColor = editorPurple.copy(alpha = .75f), unfocusedBorderColor = editorLine,
-    focusedLabelColor = editorPurple, unfocusedLabelColor = Color(0xFF929AAF), cursorColor = editorPurple,
-    focusedContainerColor = Color(0xFF080D17), unfocusedContainerColor = Color(0xFF080D17)
+    focusedLabelColor = editorPurple, unfocusedLabelColor = editorMuted, cursorColor = editorPurple,
+    focusedContainerColor = editorField, unfocusedContainerColor = editorField
 )
 
 private fun noteLabelColorOptions(): List<Pair<String, Color>> = listOf(
@@ -651,12 +784,21 @@ private fun noteLabelColorOptions(): List<Pair<String, Color>> = listOf(
     "yellow" to Color(0xFFE7B52D), "orange" to Color(0xFFEA8D3C), "pink" to Color(0xFFE56C9B), "gray" to Color(0xFF81899A)
 )
 
-private fun skinColor(skin: String): Color = when (skin) {
-    "floral" -> Color(0xFF241626)
-    "leaves" -> Color(0xFF12211D)
-    "warm" -> Color(0xFF251A18)
-    "sea" -> Color(0xFF101C2C)
-    else -> Color(0xFF080D19)
+@Composable
+private fun skinColor(skin: String): Color {
+    return if (LocalEditorPalette.current == EditorPalette.Dark) when (skin) {
+        "floral" -> Color(0xFF241626)
+        "leaves" -> Color(0xFF12211D)
+        "warm" -> Color(0xFF251A18)
+        "sea" -> Color(0xFF101C2C)
+        else -> Color(0xFF080D19)
+    } else when (skin) {
+        "floral" -> Color(0xFFFFF5FA)
+        "leaves" -> Color(0xFFF2FAF4)
+        "warm" -> Color(0xFFFFF7F0)
+        "sea" -> Color(0xFFF0F8FF)
+        else -> Color(0xFFF8F6FD)
+    }
 }
 
 private fun queryDisplayName(context: Context, uriText: String): String {
