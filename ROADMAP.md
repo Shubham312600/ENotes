@@ -82,7 +82,7 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [x] CI run #31 passed JVM tests, Android debug APK build, and artifact upload at `eef2443` (artifact: 16,283,514 bytes; expires 2026-11-03). This workstation has no local JDK, Gradle, or Android SDK.
 - [ ] Runtime screenshot comparison remains pending; no emulator is configured here.
 
-## Editor and rich note content pass (2026-10-20; CI pending)
+## Editor and rich note content pass (2026-10-20; CI passed, runtime verification pending)
 - [x] Made a recent-note card tap open a dedicated full-screen editor. The editor has a dark canvas, title and description fields, date and character counts, back/undo/redo/save controls, and a bottom insert toolbar.
 - [x] Kept category, folder, reminder timestamp, priority, pinning, label color, and AI-provider fallback controls in the editor.
 - [x] Added persistent media blocks with editable titles and descriptions. Image blocks show an inline preview, video blocks have embedded playback controls, and audio blocks can be played in the editor.
@@ -90,7 +90,8 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [x] Added a data-preserving Room 4→5 migration and kept the existing one-URI attachment field for compatibility. Old attachments open in the new editor and are converted into rich blocks when saved.
 - [x] Extended JSON backup import/export to preserve the attachment URI and rich content. Search now includes media titles and descriptions.
 - [x] Removed the surrounding header borders from Quick Actions and Quick Access and placed both section controls in the screenshot's arrow-then-Edit order.
-- [ ] CI unit tests, Android debug build, and APK artifact upload are pending for this change set. This workstation has no Java, Gradle, or Android SDK installed.
+- [x] Fixed the folder-picker brace nesting and rich-content state type reported by CI runs #33–34; CI run #35 passed JVM unit tests, Android debug build, and APK upload at commit `b1cf8b8` (artifact: 16,390,845 bytes; expires 2026-11-03).
+- [x] This workstation has no Java, Gradle, or Android SDK installed; build and unit test verification ran in GitHub Actions.
 - [ ] Check migration, media picking/playback, and the editor layout on a device or emulator; none is available here. Screenshot parity is not claimed.
 - [ ] Audio files can be embedded and played; live microphone recording and reminder notification delivery are still not implemented.
 
@@ -124,3 +125,4 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 
 ## Current honest release status
 The repository has a buildable **prototype**, not the complete product. The dashboard correction has a successful debug APK build and uploaded artifact. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
+
