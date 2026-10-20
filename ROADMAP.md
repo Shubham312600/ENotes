@@ -50,28 +50,30 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [x] Checked the prior PR CI: run #20 passed at previous branch head `565f97a` (Android debug build and APK artifact upload).
 - [x] Correction build passed at branch head `6ec6a3e` (workflow run ID `39394896484`); APK artifact `enotes-debug-apk` uploaded (16,174,472 bytes; expires 2026-11-03).
 - [x] GitHub Actions build/upload steps all succeeded; this machine has no JDK, Gradle, or Android SDK for a local build.
-- [ ] No automated test suite is configured; no emulator is available for migration/navigation/interaction tests or a screenshot comparison.
+- [x] JVM tests now cover dashboard ordering and editor text-format helpers; migration/navigation/device interactions and screenshot comparison still need an emulator.
 - [ ] Screenshot parity remains unverified until an app screenshot is captured and compared at the supplied device size.
 
-## Dashboard customization and editor pass (2026-10-20; verification pending)
+## Dashboard customization and editor pass (2026-10-20; CI passed, runtime verification pending)
 - [x] Replaced fixed action/category layouts with swipeable horizontal carousels, paging arrows, and page indicators.
 - [x] Added saved section editing: drag to reorder, hide/show, pin to the front, remove from a displayed list, and add quick actions to Quick Access.
 - [x] Quick Access can include real categories, folders, and action shortcuts; category/folder counts remain derived from active Room notes.
 - [x] Replaced the basic note dialog with a responsive editor panel including selection-aware Markdown shortcuts, undo, title/word counts, category/folder, attachment link management, reminder date/time, priority, pinning, label color, and honest AI-provider fallbacks.
 - [x] Added a Room 3→4 migration for note priority, reminder timestamp, and label color; backup import/export now carries these fields while remaining compatible with earlier backups.
 - [x] Added JVM tests for dashboard item ordering and editor text-formatting helpers; CI now runs `testDebugUnitTest` before assembling the APK.
+- [x] Fixed compile errors found by CI run #25; run #26 passed unit tests, Android debug build, and APK upload at head `00f7563` (artifact: 16,279,170 bytes; expires 2026-11-03).
 - [ ] The reminder date/time is stored on the note, but notification delivery is not implemented in this prototype.
-- [ ] Run the new unit tests and Android build in CI; this workstation has no JDK/Gradle/Android SDK.
+- [x] New JVM unit tests and Android debug build passed in GitHub Actions; this workstation has no JDK/Gradle/Android SDK for a local build.
 - [ ] Verify interaction behavior, migration from existing databases, and screenshot layout on an emulator/device; no emulator is configured here.
 - [ ] AI and voice remain unavailable without configured providers/recording support. The current one-URI note model supports one attachment per note.
 - [ ] Screenshot parity remains unverified until a runtime screenshot is captured and compared with the supplied reference.
 
 ## V1.1 — organization and documents
-- [ ] Folders and tags with Room schema migration and data-preserving tests.
+- [x] Persisted folders, note assignments, active-note counts, and Room schema migrations are implemented; emulator migration verification remains pending.
+- [ ] User-defined tags with Room schema migration and data-preserving tests.
 - [ ] Favorites/collections and filterable universal search.
 - [ ] Document library using Android's Storage Access Framework.
 - [ ] PDF viewing and external document opening; no broad storage permission unless required.
-- [ ] Attachments linked to notes.
+- [x] One PDF/image attachment can be linked to a note; multiple attachments remain unsupported by the current model.
 
 ## V1.2 — planning and privacy
 - [ ] Reminders and calendar/task views with permission-denied and notification-disabled handling.
@@ -88,7 +90,7 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 ## Release / delivery
 - [x] GitHub Actions debug APK build workflow and artifact upload.
 - [ ] Add Gradle wrapper and pin build tooling reproducibly.
-- [ ] CI build + automated tests on each pull request.
+- [x] Pull-request CI runs JVM tests before the Android debug build; run #26 passed.
 - [ ] Device/emulator smoke tests: launch, create/edit/search, archive/trash/restore, backup export/import, theme.
 - [ ] Verify release signing and release APK/AAB separately from debug artifacts.
 - [ ] Review privacy policy, data deletion/export, permissions, and store readiness.
