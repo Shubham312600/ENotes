@@ -2,7 +2,7 @@
 
 ENotes is an Android-first notes and document workspace designed around reliable offline note-taking, fast capture, powerful organization, reminders, documents, and optional AI/Drive integrations.
 
-**Current status:** Product planning and design documentation are in progress. Do not assume every planned feature is implemented yet.
+**Current status:** An initial native Android starter has been committed. It includes a Compose notes list/editor and a Room-backed local note store. The app has not yet been built or tested in an Android SDK environment, so treat buildability as unverified until CI or Android Studio confirms it.
 
 ## Project roadmap
 Read [docs/README.md](docs/README.md) for the full documentation index. Start with:
@@ -13,10 +13,16 @@ Read [docs/README.md](docs/README.md) for the full documentation index. Start wi
 - [Architecture decisions](docs/architecture-decisions.md)
 - [Testing and release checklist](docs/testing-and-release-checklist.md)
 
-## Product priorities
-1. Build a real, testable Android foundation.
-2. Deliver dependable offline notes, autosave, search, folders/tags, archive/trash and recovery.
-3. Add documents, reminders, import/share capture, accessibility and backup/export.
+## Current starter functionality
+- Native Android app using Kotlin and Jetpack Compose.
+- Local Room database for notes.
+- Create/edit notes, local title/body search, pin/unpin and move-to-trash.
+- Core note flow designed to work without account or network access.
+
+## Planned product priorities
+1. Verify a clean build and add tests for persistence and core interactions.
+2. Expand note organization: folders, tags, archive/trash recovery, templates, autosave and drafts.
+3. Add document import/viewer handoff, reminders, share capture, accessibility and export/backup.
 4. Integrate account/sync, Google Drive and AI only with real configuration, transparent privacy behavior, and secure authorization.
 5. Add advanced multitasking such as adaptive multi-pane workspaces, a Living Knowledge Map, AI study tools, and safe action proposals.
 
@@ -27,5 +33,5 @@ Read [docs/README.md](docs/README.md) for the full documentation index. Start wi
 - Never put private service keys in the Android app.
 - Core notes should remain useful offline.
 
-## Development
-The Android application scaffold and reproducible build instructions are the next engineering milestone. Once the stack is verified and scaffolded, this section must be updated with exact prerequisites and commands to build, test, and run the app.
+## Build
+Open this repository in a compatible Android Studio installation with JDK 17 and Android SDK platform 35 installed, then allow Gradle sync. The first build must be verified before adding more layers. A Gradle wrapper and CI build should be added as the next reliability step.
