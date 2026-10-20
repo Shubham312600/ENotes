@@ -33,5 +33,26 @@ class DashboardAndEditorTest {
         assertEquals(16f / 9f, normalizedVideoAspectRatio(1080f, 1920f, 90), 0.001f)
         assertEquals(16f / 9f, normalizedVideoAspectRatio(null, 1920f, 0), 0.001f)
     }
+
+    @Test
+    fun sheetRowsCanBeSelectedAndDeletedWithoutChangingOtherRows() {
+        val rows = listOf(
+            listOf("Header 1", "Header 2"),
+            listOf("A1", "B1"),
+            listOf("A2", "B2"),
+            listOf("A3", "B3")
+        )
+
+        assertEquals(listOf(rows[0], rows[1], rows[3]), deleteSheetRow(rows, 2))
+        assertEquals(rows.drop(1), deleteSheetRow(rows, -1))
+    }
+
+    @Test
+    fun sheetKeepsAtLeastOneRowAndNewRowsMatchCurrentColumnCount() {
+        val rows = listOf(listOf("Header 1", "Header 2"))
+
+        assertEquals(rows, deleteSheetRow(rows, 0))
+        assertEquals(rows + listOf(listOf("", "")), appendSheetRow(rows))
+    }
 }
 

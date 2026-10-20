@@ -581,12 +581,18 @@ private fun RichContentCard(
 @Composable
 private fun SheetGrid(block: RichContentBlock, onChange: (RichContentBlock) -> Unit, onPaste: () -> Unit) {
     var selectedColumn by remember(block.id) { mutableIntStateOf(0) }
-    val columns = maxOf(1, block.rows.maxOfOrNull { it.size } ?: 1)
-    val rows = if (block.rows.isEmpty()) List(4) { List(3) { "" } } else block.rows.map { row -> row + List((columns - row.size).coerceAtLeast(0)) { "" } }
+    var selectedRow by remember(block.id) { mutableIntStateOf(0) }
+    val rows = editableSheetRows(block.rows)
+    val columns = rows.firstOrNull()?.size ?: 1
+    val activeColumn = selectedColumn.coerceIn(0, columns - 1)
+    val activeRow = selectedRow.coerceIn(0, rows.lastIndex)
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = onPaste, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Icon(Icons.Default.ContentPaste, null, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Paste") }
-            OutlinedButton(onClick = { onChange(block.copy(rows = rows + listOf(List(columns) { "" }))) }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Text("Row") }
+            OutlinedButton(onClick = {
+                onChange(block.copy(rows = appendSheetRow(rows)))
+                selectedRow = rows.size
+            }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) { Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)); Text("Row") }
             OutlinedButton(onClick = {
                 onChange(block.copy(rows = rows.map { it + "" }))
                 selectedColumn = columns
@@ -594,7 +600,7 @@ private fun SheetGrid(block: RichContentBlock, onChange: (RichContentBlock) -> U
             IconButton(
                 onClick = {
                 if (columns > 1) {
-                    val remove = selectedColumn.coerceIn(0, columns - 1)
+                    val remove = activeColumn
                     onChange(block.copy(rows = rows.map { row -> row.filterIndexed { index, _ -> index != remove } }))
                     selectedColumn = (remove - 1).coerceAtLeast(0)
                 }
@@ -603,7 +609,28 @@ private fun SheetGrid(block: RichContentBlock, onChange: (RichContentBlock) -> U
         }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             repeat(columns) { index ->
-                FilterChip(selected = selectedColumn == index, onClick = { selectedColumn = index }, label = { Text("Column ${index + 1}") })
+                FilterChip(selected = activeColumn == index, onClick = { selectedColumn = index }, label = { Text("Column ${index + 1}") })
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                rows.indices.forEach { index ->
+                    FilterChip(selected = activeRow == index, onClick = { selectedRow = index }, label = { Text("Row ${index + 1}") })
+                }
+            }
+            IconButton(
+                onClick = {
+                    onChange(block.copy(rows = deleteSheetRow(rows, activeRow)))
+                    selectedRow = (activeRow - 1).coerceAtLeast(0)
+                },
+                enabled = rows.size > 1,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.Default.DeleteOutline, "Delete selected row", tint = if (rows.size > 1) editorPurple else editorMuted, modifier = Modifier.size(19.dp))
             }
         }
         Column(Modifier.horizontalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -618,7 +645,7 @@ private fun SheetGrid(block: RichContentBlock, onChange: (RichContentBlock) -> U
                                 }
                                 onChange(block.copy(rows = changed))
                             },
-                            modifier = Modifier.width(112.dp).heightIn(min = 40.dp).background(if (selectedColumn == columnIndex) editorSelectedCell else editorCell).border(1.dp, if (selectedColumn == columnIndex) editorPurple.copy(alpha = .5f) else editorCellLine).padding(horizontal = 7.dp, vertical = 8.dp),
+                            modifier = Modifier.width(112.dp).heightIn(min = 40.dp).background(if (activeColumn == columnIndex || activeRow == rowIndex) editorSelectedCell else editorCell).border(1.dp, if (activeColumn == columnIndex || activeRow == rowIndex) editorPurple.copy(alpha = .5f) else editorCellLine).padding(horizontal = 7.dp, vertical = 8.dp),
                             textStyle = MaterialTheme.typography.bodySmall.copy(color = editorText),
                             cursorBrush = SolidColor(editorPurple),
                             decorationBox = { inner -> Box { if (value.isBlank()) Text(if (rowIndex == 0) "Header" else "Cell", color = editorMuted, style = MaterialTheme.typography.labelSmall); inner() } }

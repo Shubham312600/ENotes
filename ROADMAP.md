@@ -105,6 +105,12 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [x] CI run #37 passed unit tests, Android debug build, and APK upload at commit `a3dc221` (artifact: 16,407,088 bytes; expires 2026-11-03). This workstation has no Java, Gradle, or Android SDK.
 - [ ] Verify image opening, portrait/landscape video playback, audio playback, sheet editing, and Light/Dark/System switching on a device or emulator; none is available here, so runtime behavior and screenshot parity are not claimed.
 
+## Sheet row controls (2026-10-20; implementation and checks pending)
+- [x] Added selectable Row 1, Row 2, and subsequent row chips beside the existing column controls; the selected row is highlighted in the grid.
+- [x] Added a compact accessible delete-row icon that removes the selected row and retains at least one row; adding a row selects the new row.
+- [ ] Run unit tests and Android debug build in CI; this workstation has no Java, Gradle, or Android SDK.
+- [ ] Verify row selection, deletion, and sheet persistence on a device or emulator.
+
 ## V1.1 — organization and documents
 - [x] Persisted folders, note assignments, active-note counts, and Room schema migrations are implemented; emulator migration verification remains pending.
 - [ ] User-defined tags with Room schema migration and data-preserving tests.

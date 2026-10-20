@@ -16,6 +16,25 @@ internal data class RichContentBlock(
     val skin: String = "plain"
 )
 
+/** Pads imported or edited sheet rows to a consistent width for the editor grid. */
+internal fun editableSheetRows(rows: List<List<String>>): List<List<String>> {
+    val columns = maxOf(1, rows.maxOfOrNull { it.size } ?: 3)
+    val sourceRows = rows.ifEmpty { List(4) { List(columns) { "" } } }
+    return sourceRows.map { row -> row + List((columns - row.size).coerceAtLeast(0)) { "" } }
+}
+
+internal fun appendSheetRow(rows: List<List<String>>): List<List<String>> {
+    val columns = maxOf(1, rows.maxOfOrNull { it.size } ?: 3)
+    return rows + listOf(List(columns) { "" })
+}
+
+/** Removes the selected row while retaining one editable row in the sheet. */
+internal fun deleteSheetRow(rows: List<List<String>>, selectedRow: Int): List<List<String>> {
+    if (rows.size <= 1) return rows
+    val indexToRemove = selectedRow.coerceIn(0, rows.lastIndex)
+    return rows.filterIndexed { index, _ -> index != indexToRemove }
+}
+
 internal fun encodeRichContent(blocks: List<RichContentBlock>): String = JSONArray().apply {
     blocks.forEach { block ->
         put(JSONObject().apply {
