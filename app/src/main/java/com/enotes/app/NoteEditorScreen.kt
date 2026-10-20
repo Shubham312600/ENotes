@@ -117,7 +117,7 @@ internal fun NoteEditorScreen(
         if (!legacyUri.isNullOrBlank() && content.none { it.uri == legacyUri }) {
             content.add(0, legacyAttachmentBlock(context, legacyUri))
         }
-        mutableStateOf(content)
+        mutableStateOf<List<RichContentBlock>>(content)
     }
     var categoryMenu by remember { mutableStateOf(false) }
     var folderMenu by remember { mutableStateOf(false) }
