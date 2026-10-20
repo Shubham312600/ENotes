@@ -43,3 +43,8 @@ These features remain roadmap items and should not be considered available in th
 5. Integrate cloud sync, Drive, and configurable AI providers with explicit user consent.
 
 No API secrets should be embedded in the Android client.
+
+
+## Living roadmap
+
+See [ROADMAP.md](ROADMAP.md) for verified implementation status, the complete product phases, and release checklist. Items are not marked complete until relevant tests have passed.
