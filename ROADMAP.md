@@ -21,7 +21,7 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] Exercise all note lifecycle flows on a device.
 - [ ] Add automated tests for repository and backup parsing.
 - [ ] Harden backup import: validate required fields/IDs and avoid unbounded memory reads.
-- [ ] Add settings-backed light/dark/system theme selection.
+- [x] Add settings-backed light/dark/system theme selection (implementation committed; pending CI build and runtime verification).
 - [ ] Improve home/editor visual hierarchy, accessibility labels, empty states, and editor draft safety.
 
 ## V1.1 — organization and documents
