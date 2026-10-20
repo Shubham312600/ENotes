@@ -7,6 +7,7 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [x] Product requirements reviewed in `docs/complete-product-roadmap.md`, `docs/screen-inventory.md`, `docs/design-system.md`, `docs/backend-and-integrations.md`, `docs/innovation-and-multitasking.md`, and `docs/testing-and-release-checklist.md`.
 - [x] Existing Android APK workflow run #13 succeeded at commit `7096e237bcae2a4b7fd98c7d4133d238f4391156`.
 - [x] Latest Android APK workflow run #17 succeeded at commit `9cd3534e4abe9937fde8af5f3c3f8e63e18de0d0` (2026-10-20).
+- [x] Dashboard Android APK workflow run #18 succeeded for implementation commit `be3b8da`; debug APK artifact is 16,112,842 bytes and expires 2026-11-03.
 - [x] Debug APK artifact `enotes-debug-apk` exists for run #13 (16,064,906 bytes; artifact expires 2026-11-03).
 - [ ] Baseline behavior verified on an Android emulator/device.
 - [ ] Automated unit/instrumentation tests exist and pass.
@@ -33,7 +34,8 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [x] Added sorting, attachment opening, and a creation menu on the FAB while preserving Archive, Trash, and Settings destinations.
 - [x] Added a Room 1→2 migration for category, folder, attachment URI, and folder records; legacy notes are retained and default to “Others”.
 - [x] Backup import/export preserves the new category and folder metadata while remaining backward compatible with V1 backups.
-- [ ] Run build and automated tests for this revision; this machine currently has no JDK, Gradle, or Android SDK, so use GitHub Actions after commit.
+- [x] Android debug build and artifact upload passed in GitHub Actions run #18; this machine has no JDK, Gradle, or Android SDK for a local build.
+- [ ] Automated tests are not configured in this repository or current workflow.
 - [ ] Verify migration, navigation, document attachment, and visual layout on an emulator/device; no emulator is configured here.
 - [ ] Voice recording and AI remain unavailable and explicitly say so; account/cloud sync and notification/reminders remain unconfigured.
 - [ ] Compare a runtime screenshot with the supplied reference; source implementation alone does not establish visual parity.
@@ -67,3 +69,4 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 
 ## Current honest release status
 The repository has a buildable **prototype**, not the complete product. The latest verified artifact is a debug APK from commit `7096e237`. Features above remain unchecked until they are implemented and tested. Cloud sync, Google Drive, and AI require backend/provider configuration and user consent.
+
