@@ -11,6 +11,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.text.style.TextOverflow
+import java.text.DateFormat
+import java.util.Date
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -62,11 +65,14 @@ private fun NotesHome(vm: NotesViewModel) {
     val trash by vm.trash.collectAsStateWithLifecycle()
     var tab by remember { mutableStateOf(Tab.NOTES) }
     var query by remember { mutableStateOf("") }
+    var sortByTitle by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
     var editor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Note?>(null) }
     var deleteTarget by remember { mutableStateOf<Note?>(null) }
     val source = when(tab) { Tab.NOTES -> notes; Tab.ARCHIVE -> archived; Tab.TRASH -> trash; Tab.SETTINGS -> emptyList() }
-    val shown = source.filter { query.isBlank() || it.title.contains(query, true) || it.body.contains(query, true) }
+    val filtered = source.filter { query.isBlank() || it.title.contains(query, true) || it.body.contains(query, true) }
+    val shown = if (sortByTitle && tab != Tab.TRASH) filtered.sortedBy { it.title.lowercase() } else filtered
     Scaffold(
         topBar = { TopAppBar(title = { Column {
             Text("ENotes", fontWeight = FontWeight.Bold)
@@ -93,7 +99,17 @@ private fun NotesHome(vm: NotesViewModel) {
             }
         } else {
             Column(Modifier.fillMaxSize().padding(inset).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), label = { Text("Search notes") }, singleLine = true)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.weight(1f), label = { Text("Search notes") }, singleLine = true, leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }, trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear search") } })
+                    Box {
+                        IconButton(onClick = { showSortMenu = true }, enabled = tab != Tab.TRASH) { Icon(Icons.Default.Sort, "Sort notes") }
+                        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                            DropdownMenuItem(text = { Text("Recently updated") }, leadingIcon = { Icon(Icons.Default.Schedule, null) }, onClick = { sortByTitle = false; showSortMenu = false })
+                            DropdownMenuItem(text = { Text("Title A–Z") }, leadingIcon = { Icon(Icons.Default.SortByAlpha, null) }, onClick = { sortByTitle = true; showSortMenu = false })
+                        }
+                    }
+                }
+                if (shown.isNotEmpty()) Text("${shown.size} " + when (tab) { Tab.NOTES -> if (shown.size == 1) "note" else "notes"; Tab.ARCHIVE -> "archived"; Tab.TRASH -> "in trash"; Tab.SETTINGS -> "" }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (shown.isEmpty()) {
                     Text(when(tab) { Tab.NOTES -> if(query.isBlank()) "Start with one small idea." else "No matching notes"; Tab.ARCHIVE -> "Nothing archived yet."; Tab.TRASH -> "Trash is empty."; Tab.SETTINGS -> "" }, style = MaterialTheme.typography.titleLarge)
                     if(tab == Tab.NOTES && query.isBlank()) Button(onClick = { editing = null; editor = true }) { Text("Create your first note") }
@@ -102,8 +118,13 @@ private fun NotesHome(vm: NotesViewModel) {
                     items(shown, key = { it.id }) { note ->
                         Card(Modifier.fillMaxWidth().clickable { if(tab != Tab.TRASH) { editing = note; editor = true } }) {
                             Column(Modifier.padding(12.dp)) {
-                                Text(note.title, style = MaterialTheme.typography.titleMedium)
-                                if(note.body.isNotBlank()) Text(note.body, maxLines = 3)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Text(note.title.ifBlank { "Untitled note" }, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    if (note.isPinned && tab == Tab.NOTES) Icon(Icons.Default.PushPin, contentDescription = "Pinned note", tint = MaterialTheme.colorScheme.primary)
+                                }
+                                if (note.body.isNotBlank()) { Spacer(Modifier.height(5.dp)); Text(note.body, maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                Spacer(Modifier.height(8.dp))
+                                Text("Updated " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(note.updatedAt)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     when(tab) {
                                         Tab.NOTES -> {
@@ -134,8 +155,9 @@ private fun NotesHome(vm: NotesViewModel) {
         var body by remember(editing?.id) { mutableStateOf(editing?.body.orEmpty()) }
         AlertDialog(onDismissRequest = { editor = false }, title = { Text(if(editing == null) "New note" else "Edit note") },
             text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true)
-                OutlinedTextField(body, { body = it }, label = { Text("Write something…") }, minLines = 4)
+                OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(body, { body = it }, label = { Text("Write something…") }, minLines = 4, modifier = Modifier.fillMaxWidth())
+                Text(body.trim().split(Regex("\\s+")).count { it.isNotBlank() }.toString() + " words · " + body.length + " characters", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } },
             confirmButton = { Button(onClick = { vm.save(title, body, editing); editor = false }) { Text("Save note") } },
             dismissButton = { TextButton(onClick = { editor = false }) { Text("Cancel") } })
