@@ -1,6 +1,7 @@
 package com.enotes.app.data
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.ColumnInfo
 @Entity(tableName = "notes")
 data class Note(
  @PrimaryKey val id: String,
@@ -10,5 +11,8 @@ data class Note(
  val updatedAt: Long,
  val isPinned: Boolean = false,
  val isArchived: Boolean = false,
- val deletedAt: Long? = null
+ val deletedAt: Long? = null,
+ @ColumnInfo(defaultValue = "'Others'") val category: String = "Others",
+ val folder: String? = null,
+ val attachmentUri: String? = null
 )

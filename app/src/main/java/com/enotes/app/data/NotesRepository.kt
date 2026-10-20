@@ -7,12 +7,14 @@ class NotesRepository(private val dao: NoteDao) {
     fun observeNotes(): Flow<List<Note>> = dao.observeActiveNotes()
     fun observeArchived(): Flow<List<Note>> = dao.observeArchivedNotes()
     fun observeTrash(): Flow<List<Note>> = dao.observeTrashedNotes()
+    fun observeFolders(): Flow<List<NoteFolder>> = dao.observeFolders()
+    suspend fun createFolder(name: String) { dao.createFolder(NoteFolder(name.trim(), System.currentTimeMillis())) }
 
     suspend fun importNotes(notes: List<Note>) {
         dao.upsertAll(notes)
     }
 
-    suspend fun save(title: String, body: String, existing: Note? = null) {
+    suspend fun save(title: String, body: String, existing: Note? = null, category: String = existing?.category ?: "Others", folder: String? = existing?.folder, attachmentUri: String? = existing?.attachmentUri) {
         val now = System.currentTimeMillis()
         dao.upsert(
             Note(
@@ -23,7 +25,10 @@ class NotesRepository(private val dao: NoteDao) {
                 updatedAt = now,
                 isPinned = existing?.isPinned ?: false,
                 isArchived = existing?.isArchived ?: false,
-                deletedAt = null
+                deletedAt = null,
+                category = category,
+                folder = folder,
+                attachmentUri = attachmentUri
             )
         )
     }
