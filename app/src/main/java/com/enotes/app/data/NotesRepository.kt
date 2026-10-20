@@ -14,7 +14,18 @@ class NotesRepository(private val dao: NoteDao) {
         dao.upsertAll(notes)
     }
 
-    suspend fun save(title: String, body: String, existing: Note? = null, category: String = existing?.category ?: "Others", folder: String? = existing?.folder, attachmentUri: String? = existing?.attachmentUri) {
+    suspend fun save(
+        title: String,
+        body: String,
+        existing: Note? = null,
+        category: String = existing?.category ?: "Others",
+        folder: String? = existing?.folder,
+        attachmentUri: String? = existing?.attachmentUri,
+        priority: String = existing?.priority ?: "Medium",
+        reminderAt: Long? = existing?.reminderAt,
+        labelColor: String = existing?.labelColor ?: "purple",
+        isPinned: Boolean = existing?.isPinned ?: false
+    ) {
         val now = System.currentTimeMillis()
         dao.upsert(
             Note(
@@ -23,12 +34,15 @@ class NotesRepository(private val dao: NoteDao) {
                 body = body,
                 createdAt = existing?.createdAt ?: now,
                 updatedAt = now,
-                isPinned = existing?.isPinned ?: false,
+                isPinned = isPinned,
                 isArchived = existing?.isArchived ?: false,
                 deletedAt = null,
                 category = category,
                 folder = folder,
-                attachmentUri = attachmentUri
+                attachmentUri = attachmentUri,
+                priority = priority,
+                reminderAt = reminderAt,
+                labelColor = labelColor
             )
         )
     }

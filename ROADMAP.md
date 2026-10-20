@@ -53,6 +53,19 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] No automated test suite is configured; no emulator is available for migration/navigation/interaction tests or a screenshot comparison.
 - [ ] Screenshot parity remains unverified until an app screenshot is captured and compared at the supplied device size.
 
+## Dashboard customization and editor pass (2026-10-20; verification pending)
+- [x] Replaced fixed action/category layouts with swipeable horizontal carousels, paging arrows, and page indicators.
+- [x] Added saved section editing: drag to reorder, hide/show, pin to the front, remove from a displayed list, and add quick actions to Quick Access.
+- [x] Quick Access can include real categories, folders, and action shortcuts; category/folder counts remain derived from active Room notes.
+- [x] Replaced the basic note dialog with a responsive editor panel including selection-aware Markdown shortcuts, undo, title/word counts, category/folder, attachment link management, reminder date/time, priority, pinning, label color, and honest AI-provider fallbacks.
+- [x] Added a Room 3→4 migration for note priority, reminder timestamp, and label color; backup import/export now carries these fields while remaining compatible with earlier backups.
+- [x] Added JVM tests for dashboard item ordering and editor text-formatting helpers; CI now runs `testDebugUnitTest` before assembling the APK.
+- [ ] The reminder date/time is stored on the note, but notification delivery is not implemented in this prototype.
+- [ ] Run the new unit tests and Android build in CI; this workstation has no JDK/Gradle/Android SDK.
+- [ ] Verify interaction behavior, migration from existing databases, and screenshot layout on an emulator/device; no emulator is configured here.
+- [ ] AI and voice remain unavailable without configured providers/recording support. The current one-URI note model supports one attachment per note.
+- [ ] Screenshot parity remains unverified until a runtime screenshot is captured and compared with the supplied reference.
+
 ## V1.1 — organization and documents
 - [ ] Folders and tags with Room schema migration and data-preserving tests.
 - [ ] Favorites/collections and filterable universal search.
@@ -82,4 +95,3 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 
 ## Current honest release status
 The repository has a buildable **prototype**, not the complete product. The dashboard correction has a successful debug APK build and uploaded artifact. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
-

@@ -93,7 +93,9 @@ class NotesViewModel(private val repo: NotesRepository) : ViewModel() {
     val archived = repo.observeArchived().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val trash = repo.observeTrash().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val folders = repo.observeFolders().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    fun save(title: String, body: String, old: Note?, category: String = old?.category ?: "Others", folder: String? = old?.folder, attachmentUri: String? = old?.attachmentUri) { viewModelScope.launch { repo.save(title, body, old, category, folder, attachmentUri) } }
+    fun save(title: String, body: String, old: Note?, category: String = old?.category ?: "Others", folder: String? = old?.folder, attachmentUri: String? = old?.attachmentUri, priority: String = old?.priority ?: "Medium", reminderAt: Long? = old?.reminderAt, labelColor: String = old?.labelColor ?: "purple", isPinned: Boolean = old?.isPinned ?: false) {
+        viewModelScope.launch { repo.save(title, body, old, category, folder, attachmentUri, priority, reminderAt, labelColor, isPinned) }
+    }
     fun createFolder(name: String) { viewModelScope.launch { repo.createFolder(name) } }
     fun trash(note: Note) { viewModelScope.launch { repo.trash(note) } }
     fun restore(note: Note) { viewModelScope.launch { repo.restore(note) } }
@@ -109,7 +111,7 @@ class NotesViewModel(private val repo: NotesRepository) : ViewModel() {
             val restored = buildList {
                 for (i in 0 until array.length()) {
                     val item = array.getJSONObject(i)
-                    add(Note(id = item.getString("id"), title = item.optString("title", "Untitled note"), body = item.optString("body", ""), createdAt = item.optLong("createdAt", System.currentTimeMillis()), updatedAt = item.optLong("updatedAt", System.currentTimeMillis()), isPinned = item.optBoolean("isPinned", false), isArchived = item.optBoolean("isArchived", false), deletedAt = if (item.isNull("deletedAt")) null else item.optLong("deletedAt"), category = item.optString("category", "Others"), folder = item.optString("folder").takeIf { it.isNotBlank() }))
+                    add(Note(id = item.getString("id"), title = item.optString("title", "Untitled note"), body = item.optString("body", ""), createdAt = item.optLong("createdAt", System.currentTimeMillis()), updatedAt = item.optLong("updatedAt", System.currentTimeMillis()), isPinned = item.optBoolean("isPinned", false), isArchived = item.optBoolean("isArchived", false), deletedAt = if (item.isNull("deletedAt")) null else item.optLong("deletedAt"), category = item.optString("category", "Others"), folder = item.optString("folder").takeIf { it.isNotBlank() }, priority = item.optString("priority", "Medium"), reminderAt = if (item.isNull("reminderAt")) null else item.optLong("reminderAt"), labelColor = item.optString("labelColor", "purple")))
                 }
             }
             require(restored.size <= 100000) { "Backup contains too many notes." }
@@ -126,6 +128,8 @@ private enum class Tab { NOTES, ARCHIVE, TRASH, SETTINGS, MORE }
 @Composable
 private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: (String) -> Unit) {
     val context = LocalContext.current
+    val dashboardStore = remember { context.getSharedPreferences("enotes_dashboard", android.content.Context.MODE_PRIVATE) }
+    var dashboardPreferences by remember { mutableStateOf(DashboardPreferences.decode(dashboardStore.getString("customization", null))) }
     val notes by vm.notes.collectAsStateWithLifecycle()
     val archived by vm.archived.collectAsStateWithLifecycle()
     val trash by vm.trash.collectAsStateWithLifecycle()
@@ -163,7 +167,17 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
     var createFolder by remember { mutableStateOf(false) }
     var fabMenu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Note?>(null) }
+    var selectedAttachmentUri by remember { mutableStateOf<String?>(null) }
     var deleteTarget by remember { mutableStateOf<Note?>(null) }
+    LaunchedEffect(editor, editing?.id) {
+        if (editor) selectedAttachmentUri = editing?.attachmentUri
+    }
+    val noteAttachmentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            selectedAttachmentUri = uri.toString()
+        }
+    }
     val source = when(tab) { Tab.NOTES -> notes; Tab.ARCHIVE -> archived; Tab.TRASH -> trash; Tab.SETTINGS, Tab.MORE -> emptyList() }
     val filtered = source.filter {
         (query.isBlank() || it.title.contains(query, true) || it.body.contains(query, true) || (it.folder?.contains(query, true) == true) || it.category.contains(query, true)) &&
@@ -225,7 +239,7 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
                 SettingRow("Backup and restore", "Create an importable JSON backup or restore one from this device. Backups stay under your control.")
                 HorizontalDivider()
                 Text("Backup and restore", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text("Export preserves note IDs, text, timestamps, pin/archive status, and trash state. Import merges by ID; matching notes are replaced.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Export preserves note IDs, text, organization, reminder and priority metadata, timestamps, and lifecycle state. Import merges by ID; matching notes are replaced.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = {
                     val allNotes = (notes + archived + trash).distinctBy { it.id }.sortedByDescending { it.updatedAt }
                     val array = JSONArray()
@@ -235,6 +249,7 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
                         put("isPinned", note.isPinned); put("isArchived", note.isArchived)
                         put("category", note.category); put("folder", note.folder ?: JSONObject.NULL)
                         put("deletedAt", note.deletedAt ?: JSONObject.NULL)
+                        put("priority", note.priority); put("reminderAt", note.reminderAt ?: JSONObject.NULL); put("labelColor", note.labelColor)
                     }) }
                     val backup = JSONObject().apply { put("format", "enotes-backup-v1"); put("exportedAt", System.currentTimeMillis()); put("notes", array) }.toString(2)
                     val sendIntent = Intent(Intent.ACTION_SEND).apply { type = "application/json"; putExtra(Intent.EXTRA_SUBJECT, "ENotes backup.json"); putExtra(Intent.EXTRA_TEXT, backup) }
@@ -250,6 +265,11 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
                 notes = shown,
                 allNotes = notes,
                 folders = folders,
+                dashboardPreferences = dashboardPreferences,
+                onDashboardPreferencesChange = { next ->
+                    dashboardPreferences = next
+                    dashboardStore.edit().putString("customization", next.encode()).apply()
+                },
                 query = query,
                 onQueryChange = { query = it },
                 categoryFilter = categoryFilter,
@@ -374,25 +394,23 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
             }
         )
     }
-    if(editor) {
-        var title by remember(editing?.id) { mutableStateOf(editing?.title.orEmpty()) }
-        var body by remember(editing?.id) { mutableStateOf(editing?.body.orEmpty()) }
-        var category by remember(editing?.id) { mutableStateOf(editing?.category ?: "Others") }
-        var folder by remember(editing?.id) { mutableStateOf(editing?.folder) }
-        var categoryMenu by remember { mutableStateOf(false) }
-        var folderMenu by remember { mutableStateOf(false) }
-        AlertDialog(onDismissRequest = { editor = false }, title = { Text(if(editing == null) "New note" else "Edit note") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(body, { body = it }, label = { Text("Write something…") }, minLines = 4, modifier = Modifier.fillMaxWidth())
-                Box { OutlinedButton(onClick={categoryMenu=true}) { Text("Category: $category") }; DropdownMenu(expanded=categoryMenu,onDismissRequest={categoryMenu=false}) { listOf("Personal","Study","Work","Others").forEach { value -> DropdownMenuItem(text={Text(value)},onClick={ category=value; categoryMenu=false }) } } }
-                Box { OutlinedButton(onClick={folderMenu=true}) { Text("Folder: ${folder ?: "None"}") }; DropdownMenu(expanded=folderMenu,onDismissRequest={folderMenu=false}) { DropdownMenuItem(text={Text("No folder")},onClick={ folder=null; folderMenu=false }); folders.forEach { value -> DropdownMenuItem(text={Text(value.name)},onClick={ folder=value.name; folderMenu=false }) } } }
-                editing?.attachmentUri?.let { uriText -> OutlinedButton(onClick={ runCatching { context.startActivity(Intent(Intent.ACTION_VIEW).apply { data=android.net.Uri.parse(uriText); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }.onFailure { quickMessage="No app could open this attachment." } }) { Icon(Icons.Default.AttachFile,null); Spacer(Modifier.width(6.dp)); Text("Open attachment") } }
-                Text(body.trim().split(Regex("\\s+")).count { it.isNotBlank() }.toString() + " words · " + body.length + " characters", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } },
-            confirmButton = { Button(onClick = { vm.save(title, body, editing, category, folder); editor = false }) { Text("Save note") } },
-            dismissButton = { TextButton(onClick = { editor = false }) { Text("Cancel") } })
-    }
+    if (editor) NoteEditorDialog(
+        note = editing,
+        folders = folders,
+        attachmentUri = selectedAttachmentUri,
+        onAttachmentChange = { selectedAttachmentUri = it },
+        onPickAttachment = { noteAttachmentLauncher.launch(arrayOf("image/*", "application/pdf")) },
+        onOpenAttachment = { uriText ->
+            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW).apply { data = android.net.Uri.parse(uriText); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
+                .onFailure { quickMessage = "No app could open this attachment." }
+        },
+        onSave = { title, body, category, folder, attachmentUri, priority, reminderAt, labelColor, pinned ->
+            vm.save(title, body, editing, category, folder, attachmentUri, priority, reminderAt, labelColor, pinned)
+            editor = false
+        },
+        onUnavailable = { quickMessage = it },
+        onDismiss = { editor = false }
+    )
     if(createFolder) {
         var name by remember { mutableStateOf("") }
         AlertDialog(onDismissRequest={createFolder=false}, title={Text("New folder")}, text={OutlinedTextField(name,{name=it},label={Text("Folder name")},singleLine=true)},
@@ -407,8 +425,6 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
     }
 }
 
-private data class HomeAction(val title: String, val subtitle: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val tint: Color, val onClick: () -> Unit)
-
 @Composable
 private fun BrandMark(size: Int) {
     Box(Modifier.size(size.dp).background(Color(0xFF5935E8), RoundedCornerShape(11.dp)).padding(5.dp), contentAlignment = Alignment.Center) {
@@ -420,6 +436,7 @@ private fun BrandMark(size: Int) {
 @Composable
 private fun HomeDashboard(
     modifier: Modifier, notes: List<Note>, allNotes: List<Note>, folders: List<NoteFolder>,
+    dashboardPreferences: DashboardPreferences, onDashboardPreferencesChange: (DashboardPreferences) -> Unit,
     query: String, onQueryChange: (String) -> Unit, categoryFilter: String, folderFilter: String?,
     pinnedOnly: Boolean, onFilterChange: () -> Unit, onCategorySelected: (String) -> Unit,
     onFolderSelected: (String?) -> Unit, onViewAll: () -> Unit, onCreateNote: () -> Unit,
@@ -428,14 +445,30 @@ private fun HomeDashboard(
     onPin: (Note) -> Unit, onArchive: (Note) -> Unit, onTrash: (Note) -> Unit
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
+    var editingActions by remember { mutableStateOf(false) }
+    var editingQuickAccess by remember { mutableStateOf(false) }
     val actions = listOf(
-        HomeAction("New Note", "Create a note", Icons.Default.NoteAdd, Color(0xFF6338E8), onCreateNote),
-        HomeAction("New Folder", "Organize notes", Icons.Default.CreateNewFolder, Color(0xFF2876E8), onCreateFolder),
-        HomeAction("Scan Document", "Choose PDF or image", Icons.Default.DocumentScanner, Color(0xFF1D9C68), onScanDocument),
-        HomeAction("Voice Note", "Unavailable", Icons.Default.Mic, Color(0xFFE34C76), { onUnavailable("Voice recording is not available in this build. No audio was recorded.") }),
-        HomeAction("AI Assistant", "Not configured", Icons.Default.AutoAwesome, Color(0xFF7047E8), { onUnavailable("AI Assistant needs a configured secure provider. No AI request was sent.") })
+        HomeAction("new_note", "New Note", "Create a note", Icons.Default.NoteAdd, Color(0xFF6338E8), onCreateNote),
+        HomeAction("new_folder", "New Folder", "Organize notes", Icons.Default.CreateNewFolder, Color(0xFF2876E8), onCreateFolder),
+        HomeAction("scan_document", "Scan Document", "Choose PDF or image", Icons.Default.DocumentScanner, Color(0xFF1D9C68), onScanDocument),
+        HomeAction("voice_note", "Voice Note", "Unavailable", Icons.Default.Mic, Color(0xFFE34C76), { onUnavailable("Voice recording is not available in this build. No audio was recorded.") }),
+        HomeAction("ai_assistant", "AI Assistant", "Not configured", Icons.Default.AutoAwesome, Color(0xFF7047E8), { onUnavailable("AI Assistant needs a configured secure provider. No AI request was sent.") })
     )
-    val categories = listOf("All Notes", "Personal", "Study", "Work", "Others")
+    val quickAccessOptions = buildList {
+        val icons = mapOf("All Notes" to Icons.Default.Layers, "Personal" to Icons.Default.Person, "Study" to Icons.Default.School, "Work" to Icons.Default.Work, "Others" to Icons.Default.MoreHoriz)
+        dashboardCategories.forEach { category ->
+            val count = if (category == "All Notes") allNotes.size else allNotes.count { it.category.equals(category, true) }
+            add(DashboardOption("category:$category", category, count.toString(), icons[category] ?: Icons.Default.Label, if (category == "All Notes") Color(0xFF5935E8) else Color(0xFF475477), selected = folderFilter == null && categoryFilter == category))
+        }
+        folders.forEach { folder ->
+            add(DashboardOption("folder:${folder.name}", folder.name, allNotes.count { it.folder == folder.name }.toString(), Icons.Default.Folder, Color(0xFF2876E8), selected = folderFilter == folder.name))
+        }
+        actions.forEach { action ->
+            add(DashboardOption("action:${action.id}", action.title, action.subtitle, action.icon, action.tint))
+        }
+    }
+    val actionOptions = actions.map { DashboardOption(it.id, it.title, it.subtitle, it.icon, it.tint) }
+    val quickAccessActionIds = dashboardPreferences.quickAccessOrder.filter { it.startsWith("action:") }.toSet()
     LazyColumn(modifier, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item(key = "search") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -456,29 +489,13 @@ private fun HomeDashboard(
                 }
             }
         }
-        item(key = "actions") { ActionGrid(actions) }
+        item(key = "actions") { QuickActionsSection(actions, dashboardPreferences) { editingActions = true } }
         item(key = "quick-access") {
-            Card(Modifier.fillMaxWidth().clickable(onClick = onViewAll), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Color(0xFFE8E5F4)), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Bolt, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Quick Access", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("Jump to your favorite categories", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Icon(Icons.Default.ChevronRight, "Show all notes", tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-        }
-        item(key = "categories") { CategoryGrid(categories, allNotes, categoryFilter, folderFilter, onCategorySelected) }
-        if (folders.isNotEmpty()) item(key = "folders") {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("Folders", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(folders, key = { it.name }) { folder ->
-                        val count = allNotes.count { it.folder == folder.name }
-                        FilterChip(selected = folderFilter == folder.name, onClick = { onFolderSelected(if (folderFilter == folder.name) null else folder.name) }, label = { Text("${folder.name} · $count") }, leadingIcon = { Icon(Icons.Default.Folder, null) })
-                    }
+            QuickAccessSection(quickAccessOptions, dashboardPreferences, onEdit = { editingQuickAccess = true }) { id ->
+                when {
+                    id.startsWith("category:") -> onCategorySelected(id.removePrefix("category:"))
+                    id.startsWith("folder:") -> onFolderSelected(id.removePrefix("folder:"))
+                    id.startsWith("action:") -> actions.firstOrNull { it.id == id.removePrefix("action:") }?.onClick?.invoke()
                 }
             }
         }
@@ -512,58 +529,46 @@ private fun HomeDashboard(
         }
         item(key = "footer") { DashboardFooter() }
     }
+    if (editingActions) CustomizeDashboardDialog(
+        title = "Edit Quick Actions",
+        description = "Drag to reorder. Hide actions you do not use, pin favorites to the front, or add an action to Quick Access.",
+        options = actionOptions,
+        order = dashboardPreferences.actionOrder,
+        hidden = dashboardPreferences.hiddenActions,
+        pinned = dashboardPreferences.pinnedActions,
+        quickAccessIds = quickAccessActionIds,
+        onVisibilityChange = { id, visible ->
+            val order = if (visible && id !in dashboardPreferences.actionOrder) dashboardPreferences.actionOrder + id else dashboardPreferences.actionOrder
+            onDashboardPreferencesChange(dashboardPreferences.copy(actionOrder = order, hiddenActions = if (visible) dashboardPreferences.hiddenActions - id else dashboardPreferences.hiddenActions + id))
+        },
+        onMove = { id, direction -> onDashboardPreferencesChange(dashboardPreferences.copy(actionOrder = moveDashboardItem(dashboardPreferences.actionOrder, id, direction))) },
+        onPinChange = { id, pin -> onDashboardPreferencesChange(dashboardPreferences.copy(pinnedActions = if (pin) dashboardPreferences.pinnedActions + id else dashboardPreferences.pinnedActions - id)) },
+        onQuickAccessChange = { id, add ->
+            val accessId = "action:$id"
+            onDashboardPreferencesChange(dashboardPreferences.copy(
+                quickAccessOrder = if (add && accessId !in dashboardPreferences.quickAccessOrder) dashboardPreferences.quickAccessOrder + accessId else if (!add) dashboardPreferences.quickAccessOrder - accessId else dashboardPreferences.quickAccessOrder,
+                hiddenQuickAccess = dashboardPreferences.hiddenQuickAccess - accessId
+            ))
+        },
+        onDismiss = { editingActions = false }
+    )
+    if (editingQuickAccess) CustomizeDashboardDialog(
+        title = "Edit Quick Access",
+        description = "Drag to reorder categories, folders and action shortcuts. Turn Show off to hide an option, or pin it to the front.",
+        options = quickAccessOptions,
+        order = dashboardPreferences.quickAccessOrder,
+        hidden = dashboardPreferences.hiddenQuickAccess,
+        pinned = dashboardPreferences.pinnedQuickAccess,
+        onVisibilityChange = { id, visible ->
+            val order = if (visible && id !in dashboardPreferences.quickAccessOrder) dashboardPreferences.quickAccessOrder + id else dashboardPreferences.quickAccessOrder
+            onDashboardPreferencesChange(dashboardPreferences.copy(quickAccessOrder = order, hiddenQuickAccess = if (visible) dashboardPreferences.hiddenQuickAccess - id else dashboardPreferences.hiddenQuickAccess + id))
+        },
+        onMove = { id, direction -> onDashboardPreferencesChange(dashboardPreferences.copy(quickAccessOrder = moveDashboardItem(dashboardPreferences.quickAccessOrder, id, direction))) },
+        onPinChange = { id, pin -> onDashboardPreferencesChange(dashboardPreferences.copy(pinnedQuickAccess = if (pin) dashboardPreferences.pinnedQuickAccess + id else dashboardPreferences.pinnedQuickAccess - id)) },
+        onDismiss = { editingQuickAccess = false }
+    )
 }
 
-@Composable
-private fun ActionGrid(actions: List<HomeAction>) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        if (maxWidth >= 360.dp) ActionRow(actions)
-        else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { ActionRow(actions.take(3)); ActionRow(actions.drop(3)) }
-    }
-}
-
-@Composable
-private fun ActionRow(actions: List<HomeAction>) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        actions.forEach { action ->
-            Card(Modifier.weight(1f).height(112.dp).clickable(onClick = action.onClick), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = action.tint.copy(alpha = 0.09f))) {
-                Column(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Icon(action.icon, action.title, tint = action.tint, modifier = Modifier.size(27.dp))
-                    Spacer(Modifier.height(5.dp))
-                    Text(action.title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(action.subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryGrid(categories: List<String>, notes: List<Note>, selectedCategory: String, selectedFolder: String?, onSelect: (String) -> Unit) {
-    val icons = mapOf("All Notes" to Icons.Default.Layers, "Personal" to Icons.Default.Person, "Study" to Icons.Default.School, "Work" to Icons.Default.Work, "Others" to Icons.Default.MoreHoriz)
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val rows = if (maxWidth >= 360.dp) listOf(categories) else listOf(categories.take(3), categories.drop(3))
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            rows.forEach { group ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    group.forEach { category ->
-                        val selected = selectedCategory == category && selectedFolder == null
-                        val count = if (category == "All Notes") notes.size else notes.count { it.category.equals(category, true) }
-                        Card(Modifier.weight(1f).height(86.dp).clickable { onSelect(category) }, shape = RoundedCornerShape(18.dp),
-                            border = BorderStroke(1.dp, if (selected) Color(0xFFD7C9FF) else Color(0xFFE9E7F1)),
-                            colors = CardDefaults.cardColors(containerColor = if (selected) Color(0xFFF0EAFE) else Color.White)) {
-                            Column(Modifier.fillMaxSize().padding(horizontal = 3.dp, vertical = 7.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                Icon(icons[category] ?: Icons.Default.Label, null, tint = if (selected) MaterialTheme.colorScheme.primary else Color(0xFF475477), modifier = Modifier.size(22.dp))
-                                Text(category, style = MaterialTheme.typography.labelMedium, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(count.toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun NoteCard(
@@ -575,24 +580,30 @@ private fun NoteCard(
     val date = remember(note.updatedAt) { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(note.updatedAt)) }
     Card(Modifier.fillMaxWidth().then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier), shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, Color(0xFFEAE8F2)), colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(11.dp), verticalAlignment = Alignment.Top) {
-            Box(Modifier.size(54.dp).background(Color(0xFFF0EAFE), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
-                Icon(if (note.attachmentUri != null) Icons.Default.InsertDriveFile else Icons.Default.Description, null, tint = Color(0xFF7650E8), modifier = Modifier.size(28.dp))
+            val noteTint = noteLabelColor(note.labelColor)
+            Box(Modifier.size(54.dp).background(noteTint.copy(alpha = 0.12f), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
+                Icon(if (note.attachmentUri != null) Icons.Default.InsertDriveFile else Icons.Default.Description, null, tint = noteTint, modifier = Modifier.size(28.dp))
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(note.title.ifBlank { "Untitled note" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(note.body.ifBlank { if (note.attachmentUri != null) "Attached document" else "No additional text" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(if (onCategory != null) Modifier.clickable(onClick = onCategory) else Modifier, color = Color(0xFFF0EAFE), shape = RoundedCornerShape(50)) {
-                        Text(note.category, Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFF5935E8))
+                    Surface(if (onCategory != null) Modifier.clickable(onClick = onCategory) else Modifier, color = noteTint.copy(alpha = 0.13f), shape = RoundedCornerShape(50)) {
+                        Text(note.category, Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = noteTint)
                     }
                     if (note.folder != null && onFolder != null) Surface(Modifier.clickable(onClick = onFolder), color = Color(0xFFF5F4FA), shape = RoundedCornerShape(50)) {
                         Text(note.folder, Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (note.attachmentUri != null) Icon(Icons.Default.AttachFile, "Has attachment", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
+                    if (note.priority != "Medium") Text(note.priority, style = MaterialTheme.typography.labelSmall, color = if (note.priority == "High") Color(0xFFB34B28) else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     Icon(Icons.Default.CalendarToday, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(14.dp))
                     Text(date, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    if (note.reminderAt != null) {
+                        Icon(Icons.Default.NotificationsActive, "Reminder saved", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                        Text(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(note.reminderAt)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
             Box {
@@ -716,4 +727,3 @@ private fun SettingRow(title: String, detail: String) {
         Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
-

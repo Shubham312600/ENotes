@@ -14,5 +14,8 @@ data class Note(
  val deletedAt: Long? = null,
  @ColumnInfo(defaultValue = "'Others'") val category: String = "Others",
  val folder: String? = null,
- val attachmentUri: String? = null
+ val attachmentUri: String? = null,
+ @ColumnInfo(defaultValue = "'Medium'") val priority: String = "Medium",
+ val reminderAt: Long? = null,
+ @ColumnInfo(defaultValue = "'purple'") val labelColor: String = "purple"
 )
