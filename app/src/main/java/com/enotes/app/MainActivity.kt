@@ -1,6 +1,7 @@
 package com.enotes.app
 
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
 import java.text.DateFormat
 import java.util.Date
 import androidx.compose.ui.Modifier
@@ -60,6 +62,7 @@ private enum class Tab { NOTES, ARCHIVE, TRASH, SETTINGS }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NotesHome(vm: NotesViewModel) {
+    val context = LocalContext.current
     val notes by vm.notes.collectAsStateWithLifecycle()
     val archived by vm.archived.collectAsStateWithLifecycle()
     val trash by vm.trash.collectAsStateWithLifecycle()
@@ -128,6 +131,15 @@ private fun NotesHome(vm: NotesViewModel) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     when(tab) {
                                         Tab.NOTES -> {
+                                            IconButton(onClick = {
+                                                val textToShare = note.title + if (note.body.isBlank()) "" else "\n\n" + note.body
+                                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(Intent.EXTRA_SUBJECT, note.title.ifBlank { "ENotes note" })
+                                                    putExtra(Intent.EXTRA_TEXT, textToShare)
+                                                }
+                                                context.startActivity(Intent.createChooser(intent, "Share note"))
+                                            }) { Icon(Icons.Default.Share, "Share note") }
                                             IconButton(onClick = { vm.pin(note) }) { Icon(Icons.Default.PushPin, if(note.isPinned) "Unpin" else "Pin") }
                                             IconButton(onClick = { vm.archive(note) }) { Icon(Icons.Default.Archive, "Archive note") }
                                             IconButton(onClick = { vm.trash(note) }) { Icon(Icons.Default.DeleteOutline, "Move to trash") }
