@@ -8,6 +8,10 @@ class NotesRepository(private val dao: NoteDao) {
     fun observeArchived(): Flow<List<Note>> = dao.observeArchivedNotes()
     fun observeTrash(): Flow<List<Note>> = dao.observeTrashedNotes()
 
+    suspend fun importNotes(notes: List<Note>) {
+        dao.upsertAll(notes)
+    }
+
     suspend fun save(title: String, body: String, existing: Note? = null) {
         val now = System.currentTimeMillis()
         dao.upsert(
