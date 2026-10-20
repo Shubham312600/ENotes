@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import java.text.DateFormat
@@ -46,7 +47,24 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { NotesHome(vm) } }
+        setContent {
+            var themeMode by remember {
+                mutableStateOf(getSharedPreferences("enotes_preferences", MODE_PRIVATE).getString("theme_mode", "system") ?: "system")
+            }
+            val dark = when (themeMode) {
+                "light" -> false
+                "dark" -> true
+                else -> isSystemInDarkTheme()
+            }
+            val scheme = if (dark) darkColorScheme(primary = androidx.compose.ui.graphics.Color(0xFFB9B7FF), secondary = androidx.compose.ui.graphics.Color(0xFFC6C3FF))
+                else lightColorScheme(primary = androidx.compose.ui.graphics.Color(0xFF4F46C8), secondary = androidx.compose.ui.graphics.Color(0xFF625BCE))
+            MaterialTheme(colorScheme = scheme) {
+                NotesHome(vm, themeMode) { mode ->
+                    themeMode = mode
+                    getSharedPreferences("enotes_preferences", MODE_PRIVATE).edit().putString("theme_mode", mode).apply()
+                }
+            }
+        }
     }
 }
 
@@ -84,7 +102,7 @@ private enum class Tab { NOTES, ARCHIVE, TRASH, SETTINGS }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NotesHome(vm: NotesViewModel) {
+private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: (String) -> Unit) {
     val context = LocalContext.current
     val notes by vm.notes.collectAsStateWithLifecycle()
     val archived by vm.archived.collectAsStateWithLifecycle()
@@ -129,7 +147,17 @@ private fun NotesHome(vm: NotesViewModel) {
                 SettingRow("Google Drive", "Not connected; Drive changes will require confirmation.")
                 SettingRow("AI assistant", "Requires a configured provider. No API key is embedded.")
                 SettingRow("App lock", "PIN and biometric lock are not implemented yet.")
-                SettingRow("Appearance", "System theme is currently used.")
+                Text("Appearance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("Choose how ENotes looks on this device.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEachIndexed { index, option ->
+                        SegmentedButton(
+                            selected = themeMode == option.first,
+                            onClick = { onThemeModeChange(option.first) },
+                            shape = SegmentedButtonDefaults.itemShape(index, 3)
+                        ) { Text(option.second) }
+                    }
+                }
                 SettingRow("Backup and restore", "Create an importable JSON backup or restore one from this device. Backups stay under your control.")
                 HorizontalDivider()
                 Text("Backup and restore", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
