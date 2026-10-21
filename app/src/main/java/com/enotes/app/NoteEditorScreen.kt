@@ -692,9 +692,9 @@ private fun noteTextStylesFromAnnotatedString(text: androidx.compose.ui.text.Ann
             italic = style.fontStyle == androidx.compose.ui.text.font.FontStyle.Italic,
             underline = style.textDecoration?.contains(TextDecoration.Underline) == true,
             strike = style.textDecoration?.contains(TextDecoration.LineThrough) == true,
-            fontSizeSp = style.fontSize.takeIf { it.isSp }?.value,
-            textColor = style.color.takeIf { it.isSpecified }?.toArgb(),
-            highlightColor = style.background.takeIf { it.isSpecified }?.toArgb()
+            fontSizeSp = style.fontSize.takeIf { it != androidx.compose.ui.unit.TextUnit.Unspecified }?.value,
+            textColor = style.color.takeIf { it != Color.Unspecified }?.toArgb(),
+            highlightColor = style.background.takeIf { it != Color.Unspecified }?.toArgb()
         )
     }.sortedBy { it.start }
 
