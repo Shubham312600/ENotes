@@ -122,14 +122,15 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] Android 8/9 gallery export permission handling and EXIF orientation preservation have not been verified.
 - [ ] Run the workflow and verify viewer gestures, export/reopen, note draft preservation, and Light/Dark appearance on a device or emulator. No runtime screenshot or device verification has been performed.
 
-## Note formatting, checklists, and photo editor correction (2026-10-21; CI rerun pending)
+## Note formatting, checklists, and photo editor correction (2026-10-21; CI passed, device verification pending)
 - [x] Connected the Text toolbar to selection-aware formatting for font size, bold/italic/underline/strike, text color, highlight, alignment, bullets, numbered lists, line spacing, and clearing selected formatting; styles are saved with the note.
 - [x] Replaced the static checkbox character with an editable checklist block whose square/circle controls toggle completion and whose tasks can be added, edited, reordered, deleted, or cleared when complete.
 - [x] The photo editor now uses the already loaded note image as a preview fallback, decodes the source with Android's image decoder where supported, and can save from the displayed source if a higher-resolution reload fails.
 - [x] Kept the photo editor title on one line and added the older Android storage permission needed for gallery export.
 - [x] Added unit coverage for text style range editing, numbered-list insertion, and checklist completion.
 - [x] CI run #45 found two Compose style parser properties that are internal in the pinned library; replaced them with public unspecified-value checks.
-- [ ] Rerun JVM tests and Android debug APK build in CI; local Java/Gradle/Android SDK are unavailable.
+- [x] CI run #46 passed JVM tests, Android debug APK build, and APK artifact upload at commit `75183cc`; artifact size 16,562,169 bytes, expires 2026-11-04.
+- [x] This workstation has no Java, Gradle, or Android SDK for a local build; checks ran in GitHub Actions.
 - [ ] Verify text selection/formatting, checklist persistence, photo preview/export, and theme colors on a device or emulator; runtime screenshot parity is not claimed.
 
 ## V1.1 — organization and documents
@@ -161,5 +162,5 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] Review privacy policy, data deletion/export, permissions, and store readiness.
 
 ## Current honest release status
-The repository has a buildable **prototype**, not the complete product. The dashboard correction and image viewer/editor passed CI run #43: JVM tests, debug APK build, and artifact upload succeeded. The APK is 16,999,241 bytes (SHA-256 `3F9A716A43FDC83CD551B75FE0D854B891A318E8FAE994D85A09A682FABEFEFF`); the GitHub artifact expires 2026-11-04. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
+The repository has a buildable **prototype**, not the complete product. Note formatting, interactive checklists, and photo editor corrections passed CI run #46: JVM tests, Android debug APK build, and artifact upload succeeded. The APK is 17,048,453 bytes (SHA-256 `2A2251D7725656AC763854997C1839744AA4BA651BE7842BA9B34DBFAF72FE49`); the GitHub artifact expires 2026-11-04. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
 
