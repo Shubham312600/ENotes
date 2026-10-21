@@ -162,15 +162,17 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] Review privacy policy, data deletion/export, permissions, and store readiness.
 
 ## Current honest release status
-The repository has a buildable **prototype**, not the complete product. Note formatting, interactive checklists, and photo editor corrections passed CI run #46: JVM tests, Android debug APK build, and artifact upload succeeded. The APK is 17,048,453 bytes (SHA-256 `2A2251D7725656AC763854997C1839744AA4BA651BE7842BA9B34DBFAF72FE49`); the GitHub artifact expires 2026-11-04. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
+The repository has a buildable **prototype**, not the complete product. The photo editor preview allocation and decoding correction passed CI run #49, including JVM tests, Android debug APK build, and artifact upload at commit `6556f73`. The artifact is 16,621,077 bytes and expires 2026-11-04. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
 
-## Photo editor preview allocation and decoding follow-up (2026-10-21; CI pending)
+## Photo editor preview allocation and decoding follow-up (2026-10-21; CI passed, device verification pending)
 - [x] Traced the screenshot's error to the preview-render branch: opening with no edits copied the embedded bitmap, then allocated another full ARGB bitmap to display the same pixels. The UI hid the render exception behind “Try a smaller image,” so the screenshot alone does not prove an OOM occurred.
 - [x] Removed the unused initial bitmap copy and skip render/allocation when the edit state has no changes. Preview source stays capped at 2,048 px, maintains aspect ratio, and uses a 1,024 px retry after a recoverable memory failure; original URI remains the source for export.
 - [x] Made source/render failures cancel safely, release owned temporary bitmaps, report separate actionable messages, and log stage, MIME type, dimensions, and exception details without logging the source URI.
 - [x] Unified embedded image and editor decoding, added safe power-of-two sampling for legacy BitmapFactory decoding, and normalize EXIF orientation on Android versions before API 28; ImageDecoder handles newer formats/orientation on API 28+.
 - [x] Added JVM tests for preview sizing, extreme dimension sampling, and the no-edit fast path.
-- [ ] Run the JVM tests and Android debug build in GitHub Actions; no local Java, Gradle, Android SDK, or emulator is configured on this workstation.
+- [x] CI run #48 exposed a Compose `produceState` key-call mismatch; corrected the vararg key call in commit `6556f73`.
+- [x] CI run #49 passed JVM tests, Android debug APK build, and artifact upload at commit `6556f73`; artifact `enotes-debug-apk` is 16,621,077 bytes and expires 2026-11-04.
+- [x] This workstation has no Java, Gradle, Android SDK, or emulator; automated checks ran in GitHub Actions.
 - [ ] Check the editor with large and EXIF-rotated photos on a device/emulator; no runtime reproduction or screenshot verification is available here.
 
 
