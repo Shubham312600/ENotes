@@ -78,6 +78,8 @@ internal data class ChecklistPrefixEdit(
     val styleRanges: List<NoteTextStyleRange>
 )
 
+private data class ChecklistPrefixChange(val start: Int, val oldLength: Int, val replacement: String)
+
 internal fun insertChecklistPrefix(
     text: String,
     selectionStart: Int,
@@ -99,17 +101,68 @@ internal fun insertChecklistPrefix(
             cursor = text.indexOf('\n', nextStart)
         }
     }
-    val result = StringBuilder(text)
-    val prefixes = lines.mapIndexed { index, _ -> if (numbered) "${index + 1}. " else "• " }
-    val insertions = lines.zip(prefixes)
-    insertions.asReversed().forEach { (line, prefix) -> result.insert(line, prefix) }
-    val shiftedSelection = end + insertions.filter { (line, _) -> line <= end }.sumOf { (_, prefix) -> prefix.length }
-    val shiftedStyles = styles.map { style ->
-        val startShift = insertions.filter { (line, _) -> line <= style.start }.sumOf { (_, prefix) -> prefix.length }
-        val endShift = insertions.filter { (line, _) -> line < style.end }.sumOf { (_, prefix) -> prefix.length }
-        style.copy(start = style.start + startShift, end = style.end + endShift)
+    val previousLineNumber = if (firstLine == 0) null else {
+        val previousEnd = firstLine - 1
+        val previousStart = text.lastIndexOf('\n', (previousEnd - 1).coerceAtLeast(0)).let { if (previousEnd == 0 || it < 0) 0 else it + 1 }
+        Regex("^[\\t ]*(\\d+)[.)][\\t ]+").find(text.substring(previousStart, previousEnd))?.groupValues?.get(1)?.toIntOrNull()
     }
+    var nextNumber = (previousLineNumber ?: 0) + 1
+    val edits = lines.map { line ->
+        val lineEnd = text.indexOf('\n', line).let { if (it < 0) text.length else it }
+        val value = text.substring(line, lineEnd)
+        val indentation = value.takeWhile { it == ' ' || it == '\t' }
+        val oldMarker = Regex("^(?:\\d+[.)]|[•*-])(?:[\\t ]+)?").find(value.drop(indentation.length))?.value.orEmpty()
+        val replacement = if (numbered) "${nextNumber++}. " else "• "
+        ChecklistPrefixChange(line + indentation.length, oldMarker.length, replacement)
+    }
+    val result = StringBuilder(text)
+    edits.asReversed().forEach { edit ->
+        result.replace(edit.start, edit.start + edit.oldLength, edit.replacement)
+    }
+    fun shiftedOffset(offset: Int, afterInsertAtSamePosition: Boolean): Int {
+        var delta = 0
+        edits.forEach { edit ->
+            val oldEnd = edit.start + edit.oldLength
+            if (offset < edit.start || (offset == edit.start && !afterInsertAtSamePosition && edit.oldLength == 0)) return offset + delta
+            if (offset <= oldEnd) return edit.start + delta + edit.replacement.length
+            delta += edit.replacement.length - edit.oldLength
+        }
+        return offset + delta
+    }
+    val shiftedSelection = shiftedOffset(end, afterInsertAtSamePosition = true)
+    val shiftedStyles = styles.map { style ->
+        style.copy(
+            start = shiftedOffset(style.start, afterInsertAtSamePosition = true),
+            end = shiftedOffset(style.end, afterInsertAtSamePosition = false)
+        ).takeIf { it.start < it.end }
+    }.filterNotNull()
     return ChecklistPrefixEdit(result.toString(), shiftedSelection, shiftedStyles)
+}
+
+/** Adds the next numbered marker when Enter creates a new line in a numbered list. */
+internal fun continueNumberedListOnNewline(
+    oldText: String,
+    newText: String,
+    cursor: Int,
+    styles: List<NoteTextStyleRange> = emptyList()
+): ChecklistPrefixEdit? {
+    val insertion = cursor.coerceIn(0, newText.length) - 1
+    if (insertion < 0 || newText.getOrNull(insertion) != '\n' || newText.length != oldText.length + 1) return null
+    if (newText.removeRange(insertion, insertion + 1) != oldText) return null
+    val previousStart = newText.lastIndexOf('\n', (insertion - 1).coerceAtLeast(0)).let { if (insertion == 0 || it < 0) 0 else it + 1 }
+    val previousLine = newText.substring(previousStart, insertion)
+    val match = Regex("^([\\t ]*)(\\d+)[.)][\\t ]+(.*)$").matchEntire(previousLine) ?: return null
+    if (match.groupValues[3].isBlank()) return null
+    val nextMarker = "${match.groupValues[2].toIntOrNull()?.plus(1) ?: return null}. "
+    val lineStart = insertion + 1
+    val updated = newText.replaceRange(lineStart, lineStart, nextMarker)
+    val shiftedStyles = styles.map { style ->
+        style.copy(
+            start = if (style.start >= lineStart) style.start + nextMarker.length else style.start,
+            end = if (style.end > lineStart) style.end + nextMarker.length else style.end
+        )
+    }
+    return ChecklistPrefixEdit(updated, cursor + nextMarker.length, shiftedStyles)
 }
 
 internal fun setChecklistTaskChecked(tasks: List<ChecklistTask>, taskId: String, checked: Boolean): List<ChecklistTask> =

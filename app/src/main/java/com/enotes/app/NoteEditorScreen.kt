@@ -204,6 +204,7 @@ internal fun NoteEditorScreen(
     var skinTarget by remember { mutableStateOf<String?>(null) }
     var showDetails by remember { mutableStateOf(false) }
     var textToolsOpen by remember(note?.id) { mutableStateOf(false) }
+    var formattingSelection by remember(note?.id) { mutableStateOf(TextRange.Zero) }
 
     LaunchedEffect(pickedBlock?.id) {
         if (pickedBlock != null && blocks.none { it.id == pickedBlock.id }) {
@@ -232,29 +233,34 @@ internal fun NoteEditorScreen(
     }
 
     fun updateBody(next: TextFieldValue, recordUndo: Boolean = true) {
-        if (recordUndo && next != body) {
+        val contentChanged = next.text != body.text || next.annotatedString != body.annotatedString
+        if (recordUndo && contentChanged) {
             undoStack.add(body)
             if (undoStack.size > 60) undoStack.removeAt(0)
             redoStack.clear()
         }
+        if (next.text != body.text) formattingSelection = TextRange.Zero
+        if (next.selection.min < next.selection.max) formattingSelection = next.selection
         body = next
         bodyStyles = noteTextStylesFromAnnotatedString(next.annotatedString)
         syncBodyFormatBlock()
     }
 
     fun applyBodyStyle(transform: (NoteTextStyleRange) -> NoteTextStyleRange) {
-        val selection = body.selection
+        val selection = formattingSelection.takeIf { it.min < it.max } ?: body.selection
         if (selection.min >= selection.max) return
         undoStack.add(body)
         if (undoStack.size > 60) undoStack.removeAt(0)
         redoStack.clear()
         bodyStyles = applyNoteTextStyle(body.text.length, bodyStyles, selection.min, selection.max, transform)
-        body = body.copy(annotatedString = styledNoteBody(body.text, bodyStyles))
+        body = TextFieldValue(styledNoteBody(body.text, bodyStyles), selection)
+        formattingSelection = selection
         syncBodyFormatBlock()
     }
 
     fun applyListPrefix(numbered: Boolean) {
-        val edit = insertChecklistPrefix(body.text, body.selection.start, body.selection.end, numbered, bodyStyles)
+        val selection = formattingSelection.takeIf { it.min < it.max } ?: body.selection
+        val edit = insertChecklistPrefix(body.text, selection.min, selection.max, numbered, bodyStyles)
         updateBody(TextFieldValue(styledNoteBody(edit.text, edit.styleRanges), TextRange(edit.selection)))
     }
 
@@ -358,7 +364,11 @@ internal fun NoteEditorScreen(
                 ) {
                     BasicTextField(
                         value = body,
-                        onValueChange = { next -> updateBody(next) },
+                        onValueChange = { next ->
+                            val continued = continueNumberedListOnNewline(body.text, next.text, next.selection.start, bodyStyles)
+                            if (continued == null) updateBody(next)
+                            else updateBody(TextFieldValue(styledNoteBody(continued.text, continued.styleRanges), TextRange(continued.selection)))
+                        },
                         modifier = Modifier.fillMaxWidth().heightIn(min = if (blocks.isEmpty()) 180.dp else 56.dp).focusRequester(bodyFocus),
                         textStyle = MaterialTheme.typography.bodyLarge.copy(
                             color = editorText,
@@ -469,6 +479,7 @@ internal fun NoteEditorScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 EditorToolbarItem(Icons.Default.TextFields, "Text", editorPurple) {
+                    if (body.selection.min < body.selection.max) formattingSelection = body.selection
                     textToolsOpen = true
                     keyboard?.hide()
                 }
@@ -507,7 +518,9 @@ internal fun NoteEditorScreen(
 
         if (textToolsOpen) {
             TextFormattingDialog(
-                selectionExists = body.selection.min < body.selection.max,
+                selectionExists = formattingSelection.min < formattingSelection.max || body.selection.min < body.selection.max,
+                alignment = bodyAlignment,
+                lineSpacing = bodyLineSpacing,
                 onStyle = { style -> applyBodyStyle { old -> when (style) {
                     "bold" -> old.copy(bold = !old.bold)
                     "italic" -> old.copy(italic = !old.italic)
@@ -521,13 +534,16 @@ internal fun NoteEditorScreen(
                 onList = ::applyListPrefix,
                 onLineSpacing = { bodyLineSpacing = it; syncBodyFormatBlock() },
                 onClear = {
-                    val selected = body.selection
-                    undoStack.add(body)
-                    if (undoStack.size > 60) undoStack.removeAt(0)
-                    redoStack.clear()
-                    bodyStyles = applyNoteTextStyle(body.text.length, bodyStyles, selected.min, selected.max) { NoteTextStyleRange(it.start, it.end) }
-                    body = body.copy(annotatedString = styledNoteBody(body.text, bodyStyles))
-                    syncBodyFormatBlock()
+                    val selected = formattingSelection.takeIf { it.min < it.max } ?: body.selection
+                    if (selected.min < selected.max) {
+                        undoStack.add(body)
+                        if (undoStack.size > 60) undoStack.removeAt(0)
+                        redoStack.clear()
+                        bodyStyles = applyNoteTextStyle(body.text.length, bodyStyles, selected.min, selected.max) { NoteTextStyleRange(it.start, it.end) }
+                        body = TextFieldValue(styledNoteBody(body.text, bodyStyles), selected)
+                        formattingSelection = selected
+                        syncBodyFormatBlock()
+                    }
                 },
                 onDone = { textToolsOpen = false; bodyFocus.requestFocus() }
             )
@@ -579,6 +595,8 @@ internal fun NoteEditorScreen(
 @Composable
 private fun TextFormattingDialog(
     selectionExists: Boolean,
+    alignment: String,
+    lineSpacing: Float,
     onStyle: (String) -> Unit,
     onFontSize: (Float) -> Unit,
     onTextColor: (Int) -> Unit,
@@ -635,10 +653,10 @@ private fun TextFormattingDialog(
                     TextButton(onClick = { onHighlight(null) }, enabled = selectionExists) { Text("Clear") }
                 }
 
-                Text("Alignment", style = MaterialTheme.typography.labelLarge)
+                Text("Alignment · applies to the note text", style = MaterialTheme.typography.labelLarge)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("start" to "Left", "center" to "Center", "end" to "Right").forEach { (value, label) ->
-                        FilterChip(selected = false, onClick = { onAlignment(value) }, label = { Text(label) })
+                        FilterChip(selected = alignment == value, onClick = { onAlignment(value) }, label = { Text(label) })
                     }
                 }
 
@@ -648,8 +666,8 @@ private fun TextFormattingDialog(
                     OutlinedButton(onClick = { onList(true) }, modifier = Modifier.weight(1f)) { Text("1.  Numbered") }
                 }
 
-                Text("Line spacing", style = MaterialTheme.typography.labelLarge)
-                var spacing by remember { mutableFloatStateOf(1.25f) }
+                var spacing by remember(lineSpacing) { mutableFloatStateOf(lineSpacing) }
+                Text("Line spacing · ${"%.2f".format(spacing)}×", style = MaterialTheme.typography.labelLarge)
                 Slider(value = spacing, onValueChange = { spacing = it; onLineSpacing(it) }, valueRange = .9f..2f, steps = 10)
                 OutlinedButton(onClick = onClear, enabled = selectionExists, modifier = Modifier.fillMaxWidth()) { Text("Clear formatting from selection") }
             }

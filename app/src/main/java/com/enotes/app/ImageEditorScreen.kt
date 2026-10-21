@@ -21,6 +21,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -69,6 +70,10 @@ import kotlin.math.min
 import kotlin.math.sin
 
 private const val IMAGE_EDITOR_LOG_TAG = "ENotesImageEditor"
+private val imageMarkupColors = listOf(
+    0xFF6639E8.toInt(), 0xFF202033.toInt(), 0xFFE53935.toInt(), 0xFFFF8F00.toInt(),
+    0xFFFDD835.toInt(), 0xFF43A047.toInt(), 0xFF1E88E5.toInt(), 0xFFFFFFFF.toInt()
+)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -88,6 +93,7 @@ internal fun ImageEditorDialog(
     var saveAsPng by remember(uriText) { mutableStateOf(mimeType.equals("image/png", true)) }
     var selectedTool by remember(uriText) { mutableStateOf("Crop") }
     var markupTool by remember(uriText) { mutableStateOf("Pen") }
+    var markupColor by remember(uriText) { mutableIntStateOf(imageMarkupColors.first()) }
     var showOriginal by remember(uriText) { mutableStateOf(false) }
     var textDialog by remember(uriText) { mutableStateOf(false) }
     var annotationText by remember(uriText) { mutableStateOf("") }
@@ -319,6 +325,7 @@ internal fun ImageEditorDialog(
                                 annotations = if (showOriginal) emptyList() else currentState.annotations,
                                 draft = if (showOriginal) null else draftAnnotation,
                                 activeTool = if (showOriginal || selectedTool != "Markup") "" else markupTool,
+                                activeColor = markupColor,
                                 onDraftChange = { draftAnnotation = it },
                                 onDraftFinish = { annotation ->
                                     if (annotation != null) latestHistoryCommit(currentState.copy(annotations = currentState.annotations + annotation))
@@ -418,13 +425,16 @@ internal fun ImageEditorDialog(
                         "Markup" -> {
                             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 FilterChip(markupTool == "Pen", { markupTool = "Pen" }, label = { Text("Pen") })
+                                FilterChip(markupTool == "Highlighter", { markupTool = "Highlighter" }, label = { Text("Highlighter") })
                                 FilterChip(markupTool == "Arrow", { markupTool = "Arrow" }, label = { Text("Arrow") })
                                 OutlinedButton(onClick = { textDialog = true }) { Icon(Icons.Default.TextFields, null); Spacer(Modifier.width(4.dp)); Text("Add text") }
                                 OutlinedButton(onClick = {
                                     if (currentState.annotations.isNotEmpty()) commit(currentState.copy(annotations = currentState.annotations.dropLast(1)))
                                 }, enabled = currentState.annotations.isNotEmpty()) { Icon(Icons.Default.DeleteOutline, "Remove last markup") }
                             }
-                            Text("Draw a pen stroke or drag to add an arrow. Markup stays editable until Save.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${markupTool} color", style = MaterialTheme.typography.labelLarge)
+                            MarkupColorPicker(markupColor) { markupColor = it }
+                            Text("Draw with the pen, broad highlighter, or arrow. Add text and choose its color here. Markup stays editable until Save.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         else -> {
                             Text("Image information", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -457,12 +467,16 @@ internal fun ImageEditorDialog(
         onDismissRequest = { textDialog = false },
         title = { Text("Add text annotation") },
         text = {
-            OutlinedTextField(annotationText, { annotationText = it }, label = { Text("Text") }, singleLine = true)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(annotationText, { annotationText = it }, label = { Text("Text") }, singleLine = true)
+                Text("Text color", style = MaterialTheme.typography.labelLarge)
+                MarkupColorPicker(markupColor) { markupColor = it }
+            }
         },
         confirmButton = {
             TextButton(onClick = {
                 val cleanText = annotationText.trim()
-                if (cleanText.isNotEmpty()) commit(currentState.copy(annotations = currentState.annotations + ImageAnnotation("text", listOf(ImagePoint(.5f, .5f)), text = cleanText)))
+                if (cleanText.isNotEmpty()) commit(currentState.copy(annotations = currentState.annotations + createImageAnnotation("Text", listOf(ImagePoint(.5f, .5f)), markupColor, cleanText)))
                 annotationText = ""; textDialog = false
             }) { Text("Add") }
         },
@@ -477,6 +491,25 @@ private fun EditorTool(label: String, icon: androidx.compose.ui.graphics.vector.
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Icon(icon, null, modifier = Modifier.size(22.dp))
             Text(label, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun MarkupColorPicker(selectedColor: Int, onSelect: (Int) -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        imageMarkupColors.forEachIndexed { index, color ->
+            val selected = color == selectedColor
+            Box(
+                Modifier.size(if (selected) 34.dp else 29.dp)
+                    .clip(CircleShape)
+                    .background(Color(color))
+                    .border(if (selected) 3.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, CircleShape)
+                    .clickable { onSelect(color) },
+                contentAlignment = Alignment.Center
+            ) {
+                if (selected) Icon(Icons.Default.Check, "Selected markup color ${index + 1}", tint = if (color == 0xFFFFFFFF.toInt() || color == 0xFFFDD835.toInt()) Color.Black else Color.White, modifier = Modifier.size(16.dp))
+            }
         }
     }
 }
@@ -519,6 +552,7 @@ private fun ImageMarkupOverlay(
     annotations: List<ImageAnnotation>,
     draft: ImageAnnotation?,
     activeTool: String,
+    activeColor: Int,
     onDraftChange: (ImageAnnotation?) -> Unit,
     onDraftFinish: (ImageAnnotation?) -> Unit
 ) {
@@ -527,8 +561,8 @@ private fun ImageMarkupOverlay(
     val latestDraftFinish by rememberUpdatedState(onDraftFinish)
     Canvas(
         Modifier.fillMaxSize().onSizeChanged { canvasSize = it }
-            .pointerInput(activeTool, bitmap, canvasSize) {
-                if (activeTool != "Pen" && activeTool != "Arrow") return@pointerInput
+            .pointerInput(activeTool, activeColor, bitmap, canvasSize) {
+                if (activeTool != "Pen" && activeTool != "Highlighter" && activeTool != "Arrow") return@pointerInput
                 var points = emptyList<ImagePoint>()
                 var working: ImageAnnotation? = null
                 detectDragGestures(
@@ -536,7 +570,7 @@ private fun ImageMarkupOverlay(
                         val bounds = bitmap?.let { imageBounds(canvasSize.width.toFloat(), canvasSize.height.toFloat(), it.width, it.height) }
                         val normalized = bounds?.let { normalizePoint(position, it) }
                         points = normalized?.let(::listOf).orEmpty()
-                        working = if (points.isNotEmpty()) ImageAnnotation(if (activeTool == "Arrow") "arrow" else "pen", points) else null
+                        working = if (points.isNotEmpty()) createImageAnnotation(activeTool, points, activeColor) else null
                         latestDraftChange(working)
                     },
                     onDrag = { change: PointerInputChange, _ ->
@@ -545,7 +579,7 @@ private fun ImageMarkupOverlay(
                         val normalized = bounds?.let { normalizePoint(change.position, it) }
                         if (normalized != null && points.isNotEmpty()) {
                             points = if (activeTool == "Arrow") listOf(points.first(), normalized) else points + normalized
-                            working = ImageAnnotation(if (activeTool == "Arrow") "arrow" else "pen", points)
+                            working = createImageAnnotation(activeTool, points, activeColor)
                             latestDraftChange(working)
                         }
                     },
@@ -573,7 +607,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMarkup(annotati
     fun x(point: ImagePoint) = bounds.left + point.x * bounds.width
     fun y(point: ImagePoint) = bounds.top + point.y * bounds.height
     when (annotation.kind) {
-        "pen" -> {
+        "pen", "highlighter" -> {
             if (points.size == 1) drawCircle(color, stroke / 2f, Offset(x(points[0]), y(points[0])))
             else {
                 val path = Path().apply { moveTo(x(points.first()), y(points.first())); points.drop(1).forEach { lineTo(x(it), y(it)) } }
@@ -761,7 +795,7 @@ private fun renderAnnotations(canvas: android.graphics.Canvas, width: Int, heigh
         fun px(p: ImagePoint) = p.x.coerceIn(0f, 1f) * width
         fun py(p: ImagePoint) = p.y.coerceIn(0f, 1f) * height
         when (annotation.kind) {
-            "pen" -> {
+            "pen", "highlighter" -> {
                 if (points.size == 1) canvas.drawCircle(px(points[0]), py(points[0]), stroke / 2f, paint)
                 else {
                     val path = android.graphics.Path().apply { moveTo(px(points.first()), py(points.first())); points.drop(1).forEach { lineTo(px(it), py(it)) } }

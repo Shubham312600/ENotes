@@ -43,6 +43,16 @@ class DashboardAndEditorTest {
     }
 
     @Test
+    fun selectedTextCanCarrySizeColorAndHighlightAndClearOnlyThatSelection() {
+        val styled = applyNoteTextStyle(10, emptyList(), 2, 7) {
+            it.copy(fontSizeSp = 24f, textColor = 0xFF1976D2.toInt(), highlightColor = 0xFFFFF176.toInt())
+        }
+
+        assertEquals(listOf(NoteTextStyleRange(2, 7, fontSizeSp = 24f, textColor = 0xFF1976D2.toInt(), highlightColor = 0xFFFFF176.toInt())), styled)
+        assertEquals(emptyList<NoteTextStyleRange>(), applyNoteTextStyle(10, styled, 2, 7) { NoteTextStyleRange(it.start, it.end) })
+    }
+
+    @Test
     fun numberedListPrefixesEachSelectedLineAndMovesExistingStyleRanges() {
         val edit = insertChecklistPrefix(
             text = "one\ntwo\nthree",
@@ -55,6 +65,27 @@ class DashboardAndEditorTest {
         assertEquals("1. one\n2. two\n3. three", edit.text)
         assertEquals(22, edit.selection)
         assertEquals(listOf(NoteTextStyleRange(3, 6, bold = true)), edit.styleRanges)
+    }
+
+    @Test
+    fun numberedListContinuesFromPreviousLineAndReplacesExistingMarkers() {
+        val continued = insertChecklistPrefix("1. first\nsecond", 9, 9, numbered = true)
+        assertEquals("1. first\n2. second", continued.text)
+
+        val renumbered = insertChecklistPrefix("1. first\n1. second\n• third", 0, 25, numbered = true)
+        assertEquals("1. first\n2. second\n3. third", renumbered.text)
+    }
+
+    @Test
+    fun pressingEnterContinuesNumberedListAndKeepsFormattingOffsets() {
+        val result = continueNumberedListOnNewline(
+            oldText = "1. first",
+            newText = "1. first\n",
+            cursor = 9,
+            styles = listOf(NoteTextStyleRange(3, 8, bold = true))
+        )
+
+        assertEquals(ChecklistPrefixEdit("1. first\n2. ", 12, listOf(NoteTextStyleRange(3, 8, bold = true))), result)
     }
 
     @Test
@@ -111,6 +142,17 @@ class DashboardAndEditorTest {
         assertEquals(PanOffset(100f, 0f), clampViewerPan(PanOffset(500f, 30f), viewport, image, 3f))
         assertEquals(PanOffset(-100f, 0f), clampViewerPan(PanOffset(-500f, -30f), viewport, image, 3f))
         assertEquals(PanOffset(0f, 0f), clampViewerPan(PanOffset(12f, -5f), viewport, image, 1f))
+    }
+
+    @Test
+    fun photoMarkupToolsKeepTheirChosenColorAndHighlighterIsTranslucentAndWide() {
+        val points = listOf(ImagePoint(.1f, .2f), ImagePoint(.8f, .7f))
+        val blue = 0xFF1E88E5.toInt()
+
+        assertEquals(ImageAnnotation("pen", points, color = blue), createImageAnnotation("Pen", points, blue))
+        assertEquals(ImageAnnotation("arrow", points, color = blue), createImageAnnotation("Arrow", points, blue))
+        assertEquals(ImageAnnotation("highlighter", points, color = 0x661E88E5.toInt(), width = .045f), createImageAnnotation("Highlighter", points, blue))
+        assertEquals(ImageAnnotation("text", listOf(ImagePoint(.5f, .5f)), text = "Marked", color = blue, width = .07f), createImageAnnotation("Text", listOf(ImagePoint(.5f, .5f)), blue, "Marked"))
     }
 
     @Test

@@ -176,3 +176,10 @@ The repository has a buildable **prototype**, not the complete product. The phot
 - [ ] Check the editor with large and EXIF-rotated photos on a device/emulator; no runtime reproduction or screenshot verification is available here.
 
 
+
+## Text formatting and photo markup follow-up (2026-10-21; verification pending)
+- [ ] Keep the selected note-text range available while the formatting dialog is open; apply and clear styles against that range, and continue numbered lists when Enter creates a new line.
+- [ ] Apply alignment and line spacing to the note text, show the active alignment and current spacing, and retain list/style range offsets when list markers are changed.
+- [ ] Add a color palette for pen, translucent highlighter, arrows, and text annotations; render these colors in both the editor preview and saved image.
+- [ ] Unit coverage was added for formatting ranges, numbered-list continuation, and colored markup; the test suite and APK build still need to run.
+- [ ] Verify the editor interactions and saved image on a device or emulator; no runtime verification is available in this workspace.
