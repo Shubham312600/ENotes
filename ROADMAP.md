@@ -185,3 +185,12 @@ The repository has a buildable **prototype**, not the complete product. The phot
 - [x] GitHub Actions run #51 passed unit tests, Android debug APK build, and artifact upload for commit `c3d2007`; artifact size 16,630,303 bytes, expires 2026-11-04.
 - [x] `git diff --check` passed; this workstation has no local JDK, Gradle, or Android SDK.
 - [ ] Verify formatting and markup gestures, saved image appearance, and undo/redo on a device or emulator; runtime behavior has not been checked here.
+
+## Formatting persistence, highlighter transparency, and dark palette (2026-10-22; CI passed, device verification pending)
+- [x] Kept note style ranges as the editor's source of truth, remapped them when text changes, and prevented plain-text callbacks from replacing saved spans or polluting undo history; undo/redo restore the corresponding styles.
+- [x] Added a highlighter transparency slider that adjusts annotation alpha; pen, arrow, and text colors continue to use the markup color palette.
+- [x] Replaced hard-coded light dashboard card colors with theme surfaces and readable on-surface text, and refined dark mode with aubergine surfaces, lavender/teal accents, and brighter note-label/action tints.
+- [x] Added JVM coverage for style-range retention and remapping across text edits, plus highlighter alpha values.
+- [x] CI run #54 passed JVM tests, Android debug APK build, and APK artifact upload for commit `e99fbcc`; artifact size 16,636,129 bytes and expiration is 2026-11-04.
+- [x] This workstation has no Gradle wrapper, Java, Gradle, or Android SDK; implementation checks ran in GitHub Actions.
+- [ ] Verify formatting persistence after waiting, highlighter transparency in a saved photo, and the dark dashboard appearance on a device/emulator.
