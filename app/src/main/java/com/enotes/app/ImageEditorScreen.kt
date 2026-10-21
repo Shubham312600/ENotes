@@ -190,7 +190,7 @@ internal fun ImageEditorDialog(
                                 activeTool = if (showOriginal || selectedTool != "Markup") "" else markupTool,
                                 onDraftChange = { draftAnnotation = it },
                                 onDraftFinish = { annotation ->
-                                    if (annotation != null) latestHistoryCommit.value(currentState.copy(annotations = currentState.annotations + annotation))
+                                    if (annotation != null) latestHistoryCommit(currentState.copy(annotations = currentState.annotations + annotation))
                                     draftAnnotation = null
                                 }
                             )
