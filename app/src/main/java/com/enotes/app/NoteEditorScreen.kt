@@ -15,6 +15,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -51,6 +53,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.AnnotatedString
@@ -526,6 +533,8 @@ private fun RichContentCard(
 ) {
     val bg = skinColor(block.skin)
     var viewerOpen by remember(block.id) { mutableStateOf(false) }
+    var editorOpen by remember(block.id) { mutableStateOf(false) }
+    var confirmDetach by remember(block.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().border(1.dp, editorLine, RoundedCornerShape(16.dp)).background(bg, RoundedCornerShape(16.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(when (block.kind) {
@@ -537,12 +546,23 @@ private fun RichContentCard(
             }, null, tint = if (block.kind == "video") editorBlue else editorPurple)
             Text(when (block.kind) { "image" -> "Image"; "video" -> "Video"; "audio" -> "Audio"; "sheet" -> "Sheet"; else -> "Attachment" }, Modifier.weight(1f).padding(start = 8.dp), color = editorText, fontWeight = FontWeight.SemiBold)
             if (block.kind == "sheet") TextButton(onClick = onSkin, contentPadding = PaddingValues(horizontal = 8.dp)) { Icon(Icons.Default.Palette, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(4.dp)); Text("Skins") }
-            if (block.uri != null && block.kind in setOf("image", "video")) IconButton(onClick = { viewerOpen = true }, modifier = Modifier.size(34.dp)) {
-                Icon(Icons.Default.OpenInFull, if (block.kind == "image") "View image" else "View video", tint = editorBlue, modifier = Modifier.size(18.dp))
-            } else if (block.uri != null) IconButton(onClick = onOpen, modifier = Modifier.size(34.dp)) {
+            if (block.uri != null && block.kind == "image") {
+                TextButton(onClick = { editorOpen = true }, contentPadding = PaddingValues(horizontal = 5.dp), modifier = Modifier.height(40.dp)) {
+                    Icon(Icons.Default.Edit, "Edit image", tint = editorPurple, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(3.dp))
+                    Text("Edit", color = editorPurple, style = MaterialTheme.typography.labelLarge)
+                }
+                TextButton(onClick = { viewerOpen = true }, contentPadding = PaddingValues(horizontal = 5.dp), modifier = Modifier.height(40.dp)) {
+                    Icon(Icons.Default.Visibility, "View image", tint = editorPurple, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(3.dp))
+                    Text("View", color = editorPurple, style = MaterialTheme.typography.labelLarge)
+                }
+            } else if (block.uri != null && block.kind == "video") IconButton(onClick = { viewerOpen = true }, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.OpenInFull, "View video", tint = editorBlue, modifier = Modifier.size(18.dp))
+            } else if (block.uri != null) IconButton(onClick = onOpen, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Default.OpenInNew, "Open media", tint = editorBlue, modifier = Modifier.size(18.dp))
             }
-            IconButton(onClick = onRemove, modifier = Modifier.size(34.dp)) { Icon(Icons.Default.Close, "Remove content", tint = editorMuted, modifier = Modifier.size(18.dp)) }
+            IconButton(onClick = { if (block.kind == "image") confirmDetach = true else onRemove() }, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Close, "Remove content", tint = editorMuted, modifier = Modifier.size(18.dp)) }
         }
 
         if (block.kind == "image" && block.uri != null) EmbeddedImage(block.uri) { viewerOpen = true }
@@ -575,6 +595,26 @@ private fun RichContentCard(
     }
     if (viewerOpen && block.uri != null && block.kind in setOf("image", "video")) {
         MediaViewerDialog(block, onDismiss = { viewerOpen = false })
+    }
+    if (editorOpen && block.kind == "image" && block.uri != null) {
+        ImageEditorDialog(
+            uriText = block.uri,
+            mimeType = block.mimeType,
+            onDismiss = { editorOpen = false },
+            onSaved = { uri, mime ->
+                onChange(block.copy(uri = uri, mimeType = mime))
+                editorOpen = false
+            }
+        )
+    }
+    if (confirmDetach) {
+        AlertDialog(
+            onDismissRequest = { confirmDetach = false },
+            title = { Text("Remove image from note?") },
+            text = { Text("This detaches the image from this note. The original file on your device will not be deleted.") },
+            confirmButton = { TextButton(onClick = { confirmDetach = false; onRemove() }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { confirmDetach = false }) { Text("Cancel") } }
+        )
     }
 }
 
@@ -669,15 +709,15 @@ private fun EmbeddedImage(uriText: String, onOpen: () -> Unit) {
 }
 
 @Composable
-private fun produceImage(uriText: String, context: Context): State<ImageBitmap?> {
-    return produceState<ImageBitmap?>(initialValue = null, key1 = uriText) {
+private fun produceImage(uriText: String, context: Context, maxDimension: Int = 1800): State<ImageBitmap?> {
+    return produceState<ImageBitmap?>(initialValue = null, key1 = uriText, key2 = maxDimension) {
         value = withContext(Dispatchers.IO) {
             runCatching {
                 val uri = Uri.parse(uriText)
                 val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
                 var sample = 1
-                while (bounds.outWidth / sample > 1800 || bounds.outHeight / sample > 1800) sample *= 2
+                while (bounds.outWidth / sample > maxDimension || bounds.outHeight / sample > maxDimension) sample *= 2
                 val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
                 val bitmap = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
                 bitmap?.asImageBitmap()
@@ -739,9 +779,67 @@ private fun MediaViewerDialog(block: RichContentBlock, onDismiss: () -> Unit) {
         BoxWithConstraints(Modifier.fillMaxSize().background(editorBg)) {
             if (block.kind == "image") {
                 val context = LocalContext.current
-                val image by produceImage(uriText, context)
+                val image by produceImage(uriText, context, maxDimension = 3200)
                 if (image != null) {
-                    Image(image!!, contentDescription = "Full-screen image", modifier = Modifier.fillMaxSize().padding(20.dp), contentScale = ContentScale.Fit)
+                    var scale by remember(uriText) { mutableFloatStateOf(1f) }
+                    var translationX by remember(uriText) { mutableFloatStateOf(0f) }
+                    var translationY by remember(uriText) { mutableFloatStateOf(0f) }
+                    var viewport by remember(uriText) { mutableStateOf(IntSize.Zero) }
+                    val currentImage = image!!
+                    val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+                        val nextScale = (scale * zoomChange).coerceIn(1f, 6f)
+                        val nextPan = if (nextScale <= 1.001f) PanOffset(0f, 0f) else clampViewerPan(
+                            PanOffset(translationX + panChange.x, translationY + panChange.y),
+                            PanSize(viewport.width.toFloat(), viewport.height.toFloat()),
+                            PanSize(currentImage.width.toFloat(), currentImage.height.toFloat()),
+                            nextScale
+                        )
+                        scale = nextScale
+                        translationX = nextPan.x
+                        translationY = nextPan.y
+                    }
+                    Box(
+                        Modifier.fillMaxSize().padding(20.dp)
+                            .onSizeChanged { viewport = it }
+                            .pointerInput(uriText, viewport, scale) {
+                                detectTapGestures(onDoubleTap = { tap ->
+                                    if (scale > 1.05f) {
+                                        scale = 1f
+                                        translationX = 0f
+                                        translationY = 0f
+                                    } else {
+                                        val target = 2.5f
+                                        val candidate = PanOffset(
+                                            -(tap.x - viewport.width / 2f) * (target - 1f),
+                                            -(tap.y - viewport.height / 2f) * (target - 1f)
+                                        )
+                                        val clamped = clampViewerPan(
+                                            candidate,
+                                            PanSize(viewport.width.toFloat(), viewport.height.toFloat()),
+                                            PanSize(currentImage.width.toFloat(), currentImage.height.toFloat()),
+                                            target
+                                        )
+                                        scale = target
+                                        translationX = clamped.x
+                                        translationY = clamped.y
+                                    }
+                                })
+                            }
+                            .transformable(transformState),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            currentImage,
+                            contentDescription = "Full-screen image. Pinch to zoom, drag to pan, double-tap to zoom.",
+                            modifier = Modifier.fillMaxSize().graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                this.translationX = translationX
+                                this.translationY = translationY
+                            },
+                            contentScale = ContentScale.Fit
+                        )
+                    }
                 } else {
                     Text("This image could not be previewed on this device.", Modifier.align(Alignment.Center).padding(24.dp), color = editorText)
                 }
