@@ -122,6 +122,15 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [ ] Android 8/9 gallery export permission handling and EXIF orientation preservation have not been verified.
 - [ ] Run the workflow and verify viewer gestures, export/reopen, note draft preservation, and Light/Dark appearance on a device or emulator. No runtime screenshot or device verification has been performed.
 
+## Note formatting, checklists, and photo editor correction (2026-10-21; CI pending)
+- [x] Connected the Text toolbar to selection-aware formatting for font size, bold/italic/underline/strike, text color, highlight, alignment, bullets, numbered lists, line spacing, and clearing selected formatting; styles are saved with the note.
+- [x] Replaced the static checkbox character with an editable checklist block whose square/circle controls toggle completion and whose tasks can be added, edited, reordered, deleted, or cleared when complete.
+- [x] The photo editor now uses the already loaded note image as a preview fallback, decodes the source with Android's image decoder where supported, and can save from the displayed source if a higher-resolution reload fails.
+- [x] Kept the photo editor title on one line and added the older Android storage permission needed for gallery export.
+- [x] Added unit coverage for text style range editing, numbered-list insertion, and checklist completion.
+- [ ] Run JVM tests and Android debug APK build in CI; local Java/Gradle/Android SDK are unavailable.
+- [ ] Verify text selection/formatting, checklist persistence, photo preview/export, and theme colors on a device or emulator; runtime screenshot parity is not claimed.
+
 ## V1.1 — organization and documents
 - [x] Persisted folders, note assignments, active-note counts, and Room schema migrations are implemented; emulator migration verification remains pending.
 - [ ] User-defined tags with Room schema migration and data-preserving tests.

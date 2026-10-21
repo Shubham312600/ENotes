@@ -2,16 +2,20 @@ package com.enotes.app
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -36,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -64,6 +69,7 @@ import kotlin.math.sin
 internal fun ImageEditorDialog(
     uriText: String,
     mimeType: String,
+    initialPreview: androidx.compose.ui.graphics.ImageBitmap?,
     onDismiss: () -> Unit,
     onSaved: (String, String) -> Unit
 ) {
@@ -80,15 +86,25 @@ internal fun ImageEditorDialog(
     var textDialog by remember(uriText) { mutableStateOf(false) }
     var annotationText by remember(uriText) { mutableStateOf("") }
     var draftAnnotation by remember(uriText) { mutableStateOf<ImageAnnotation?>(null) }
+    var pendingSave by remember(uriText) { mutableStateOf(false) }
     val historyState = remember(uriText) { mutableStateOf(ImageEditHistory()) }
     var history by historyState
     val currentState = history.current
 
-    val sourceLoad by produceState<Pair<Bitmap?, Boolean>>(initialValue = null to false, key1 = uriText) {
-        val loaded = withContext(Dispatchers.IO) { runCatching { decodeBitmap(context, Uri.parse(uriText), 1800) }.getOrNull() }
-        value = loaded to true
+    val storagePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) pendingSave = true else saveError = "Storage permission is needed to save an edited image on this Android version."
     }
-    val source = sourceLoad.first
+
+    val sourceLoad by produceState<ImageLoadResult>(initialValue = ImageLoadResult(null, null), key1 = uriText, key2 = initialPreview) {
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val previewCopy = initialPreview?.let { runCatching { it.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() }
+                previewCopy ?: decodeBitmap(context, Uri.parse(uriText), 1800)
+            }.fold({ ImageLoadResult(it, null) }, { ImageLoadResult(null, it.message ?: "The image provider could not open this file.") })
+        }
+        value = result
+    }
+    val source = sourceLoad.bitmap
     DisposableEffect(source) {
         onDispose { source?.let { if (!it.isRecycled) it.recycle() } }
     }
@@ -119,6 +135,34 @@ internal fun ImageEditorDialog(
     fun requestDismiss() {
         if (currentState == ImageEditState()) onDismiss() else discardConfirmation = true
     }
+    fun saveEditedImage() {
+        val original = source ?: return
+        val exportState = historyState.value.current
+        busy = true
+        saveError = null
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val full = runCatching { decodeBitmap(context, Uri.parse(uriText), 4800) }
+                        .getOrElse { original.copy(Bitmap.Config.ARGB_8888, false) ?: throw it }
+                    try {
+                        val output = renderEditedBitmap(full, exportState)
+                        try { saveToGallery(context, output, saveAsPng) } finally { if (output !== full) output.recycle() }
+                    } finally { if (full !== original && !full.isRecycled) full.recycle() }
+                }
+            }
+            busy = false
+            result.onSuccess { onSaved(it.toString(), if (saveAsPng) "image/png" else "image/jpeg") }
+                .onFailure { saveError = it.message ?: "The edited image could not be saved." }
+        }
+    }
+
+    LaunchedEffect(pendingSave) {
+        if (pendingSave) {
+            pendingSave = false
+            saveEditedImage()
+        }
+    }
     BackHandler { requestDismiss() }
 
     Dialog(onDismissRequest = { requestDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -129,16 +173,16 @@ internal fun ImageEditorDialog(
         ) {
             Column(Modifier.fillMaxSize()) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 5.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    horizontalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
-                    IconButton(onClick = { requestDismiss() }, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.ArrowBack, "Cancel image editing") }
-                    Text("Edit photo", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    IconButton(onClick = { history = undoImageEdit(history) }, enabled = history.undo.isNotEmpty()) { Icon(Icons.Default.Undo, "Undo edit") }
-                    IconButton(onClick = { history = redoImageEdit(history) }, enabled = history.redo.isNotEmpty()) { Icon(Icons.Default.Redo, "Redo edit") }
+                    IconButton(onClick = { requestDismiss() }, modifier = Modifier.size(42.dp)) { Icon(Icons.Default.ArrowBack, "Cancel image editing") }
+                    Text("Edit photo", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    IconButton(onClick = { history = undoImageEdit(history) }, enabled = history.undo.isNotEmpty(), modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Undo, "Undo edit") }
+                    IconButton(onClick = { history = redoImageEdit(history) }, enabled = history.redo.isNotEmpty(), modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Redo, "Redo edit") }
                     Box {
-                        TextButton(onClick = { formatMenu = true }, enabled = !busy) { Text(if (saveAsPng) "PNG" else "JPEG") }
+                        TextButton(onClick = { formatMenu = true }, enabled = !busy, contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.width(44.dp)) { Text(if (saveAsPng) "PNG" else "JPG", maxLines = 1) }
                         DropdownMenu(expanded = formatMenu, onDismissRequest = { formatMenu = false }) {
                             DropdownMenuItem(text = { Text("Save as PNG") }, onClick = { saveAsPng = true; formatMenu = false })
                             DropdownMenuItem(text = { Text("Save as JPEG") }, onClick = { saveAsPng = false; formatMenu = false })
@@ -146,26 +190,17 @@ internal fun ImageEditorDialog(
                     }
                     Button(
                         onClick = {
-                            val original = source ?: return@Button
-                            val exportState = currentState
-                            busy = true
-                            saveError = null
-                            scope.launch {
-                                val result = withContext(Dispatchers.IO) {
-                                    runCatching {
-                                        val full = decodeBitmap(context, Uri.parse(uriText), 4800)
-                                        try {
-                                            val output = renderEditedBitmap(full, exportState)
-                                            try { saveToGallery(context, output, saveAsPng) } finally { if (output !== full) output.recycle() }
-                                        } finally { if (full !== original && !full.isRecycled) full.recycle() }
-                                    }
-                                }
-                                busy = false
-                                result.onSuccess { onSaved(it.toString(), if (saveAsPng) "image/png" else "image/jpeg") }
-                                    .onFailure { saveError = it.message ?: "The edited image could not be saved." }
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                                context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+                            ) {
+                                storagePermission.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            } else {
+                                saveEditedImage()
                             }
                         },
-                        enabled = source != null && !busy,
+                        enabled = source != null && preview != null && !busy,
+                        modifier = Modifier.height(44.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Default.Save, null, modifier = Modifier.size(18.dp))
@@ -174,8 +209,9 @@ internal fun ImageEditorDialog(
                 }
 
                 Box(
-                    Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.surface),
+                    Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp).clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .42f))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f), RoundedCornerShape(20.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     val shown = if (showOriginal) source else preview
@@ -199,14 +235,18 @@ internal fun ImageEditorDialog(
                             onClick = { showOriginal = !showOriginal },
                             modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = .92f), RoundedCornerShape(16.dp))
                         ) { Text(if (showOriginal) "Show edits" else "Before") }
-                    } else if (source == null && !sourceLoad.second) {
+                    } else if (source == null && sourceLoad.error == null) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             CircularProgressIndicator()
                             Spacer(Modifier.height(10.dp))
                             Text("Loading image…", color = MaterialTheme.colorScheme.onBackground)
                         }
                     } else if (source == null) {
-                        Text("This image could not be opened for editing.", color = MaterialTheme.colorScheme.onBackground)
+                        Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.BrokenImage, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(34.dp))
+                            Text("This image could not be opened for editing.", color = MaterialTheme.colorScheme.onBackground, style = MaterialTheme.typography.titleMedium)
+                            Text(sourceLoad.error.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        }
                     } else if (preview == null) {
                         Text("A preview could not be rendered. Try a smaller image.", color = MaterialTheme.colorScheme.onBackground)
                     }
@@ -449,7 +489,19 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMarkup(annotati
     }
 }
 
+private data class ImageLoadResult(val bitmap: Bitmap?, val error: String?)
+
 private fun decodeBitmap(context: Context, uri: Uri, maxDimension: Int): Bitmap {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val source = ImageDecoder.createSource(context.contentResolver, uri)
+        return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val width = info.size.width.coerceAtLeast(1)
+            val height = info.size.height.coerceAtLeast(1)
+            val scale = min(1f, maxDimension.toFloat() / maxOf(width, height))
+            decoder.setTargetSize((width * scale).toInt().coerceAtLeast(1), (height * scale).toInt().coerceAtLeast(1))
+        }
+    }
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         ?: throw IOException("The source image is unavailable.")

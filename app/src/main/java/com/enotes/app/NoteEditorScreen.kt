@@ -39,6 +39,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,8 +64,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.AnnotatedString
 import com.enotes.app.data.Note
 import com.enotes.app.data.NoteFolder
 import kotlinx.coroutines.Dispatchers
@@ -165,23 +168,31 @@ internal fun NoteEditorScreen(
     val clipboard = LocalClipboardManager.current
     val undoStack = remember(note?.id) { mutableStateListOf<TextFieldValue>() }
     val redoStack = remember(note?.id) { mutableStateListOf<TextFieldValue>() }
-    var title by remember(note?.id) { mutableStateOf(note?.title.orEmpty()) }
-    var body by remember(note?.id) { mutableStateOf(TextFieldValue(note?.body.orEmpty())) }
-    var category by remember(note?.id) { mutableStateOf(note?.category ?: "Others") }
-    var folder by remember(note?.id) { mutableStateOf(note?.folder) }
-    var priority by remember(note?.id) { mutableStateOf(note?.priority ?: "Medium") }
-    var reminderAt by remember(note?.id) { mutableStateOf(note?.reminderAt) }
-    var labelColor by remember(note?.id) { mutableStateOf(note?.labelColor ?: "purple") }
-    var pinned by remember(note?.id) { mutableStateOf(note?.isPinned ?: false) }
-    var blocks by remember(note?.id) {
+    val initialBlocks = remember(note?.id) {
         val saved = decodeRichContent(note?.richContentJson)
         val content = saved.toMutableList()
         val legacyUri = note?.attachmentUri
         if (!legacyUri.isNullOrBlank() && content.none { it.uri == legacyUri }) {
             content.add(0, legacyAttachmentBlock(context, legacyUri))
         }
-        mutableStateOf<List<RichContentBlock>>(content)
+        content
     }
+    val savedBodyFormat = remember(note?.id) { initialBlocks.firstOrNull { it.kind == "body-formatting" } }
+    var bodyStyles by remember(note?.id) { mutableStateOf(savedBodyFormat?.textStyles.orEmpty()) }
+    var bodyAlignment by remember(note?.id) { mutableStateOf(savedBodyFormat?.textAlignment ?: "start") }
+    var bodyLineSpacing by remember(note?.id) { mutableFloatStateOf(savedBodyFormat?.textLineSpacing ?: 1.25f) }
+    var title by remember(note?.id) { mutableStateOf(note?.title.orEmpty()) }
+    var body by remember(note?.id) {
+        val text = note?.body.orEmpty()
+        mutableStateOf(TextFieldValue(styledNoteBody(text, bodyStyles), TextRange(text.length)))
+    }
+    var category by remember(note?.id) { mutableStateOf(note?.category ?: "Others") }
+    var folder by remember(note?.id) { mutableStateOf(note?.folder) }
+    var priority by remember(note?.id) { mutableStateOf(note?.priority ?: "Medium") }
+    var reminderAt by remember(note?.id) { mutableStateOf(note?.reminderAt) }
+    var labelColor by remember(note?.id) { mutableStateOf(note?.labelColor ?: "purple") }
+    var pinned by remember(note?.id) { mutableStateOf(note?.isPinned ?: false) }
+    var blocks by remember(note?.id) { mutableStateOf<List<RichContentBlock>>(initialBlocks) }
     var categoryMenu by remember { mutableStateOf(false) }
     var folderMenu by remember { mutableStateOf(false) }
     var priorityMenu by remember { mutableStateOf(false) }
@@ -190,6 +201,7 @@ internal fun NoteEditorScreen(
     var reminderMessage by remember { mutableStateOf(false) }
     var skinTarget by remember { mutableStateOf<String?>(null) }
     var showDetails by remember { mutableStateOf(false) }
+    var textToolsOpen by remember(note?.id) { mutableStateOf(false) }
 
     LaunchedEffect(pickedBlock?.id) {
         if (pickedBlock != null && blocks.none { it.id == pickedBlock.id }) {
@@ -202,11 +214,50 @@ internal fun NoteEditorScreen(
         blocks = blocks.map { if (it.id == id) transform(it) else it }
     }
 
-    fun changeBody(result: TextEditResult) {
+    fun syncBodyFormatBlock() {
+        val without = blocks.filterNot { it.kind == "body-formatting" }
+        blocks = if (bodyStyles.isEmpty() && bodyAlignment == "start" && bodyLineSpacing == 1.25f) {
+            without
+        } else {
+            without + RichContentBlock(
+                id = savedBodyFormat?.id ?: "body-formatting-${note?.id ?: "new"}",
+                kind = "body-formatting",
+                textStyles = bodyStyles,
+                textAlignment = bodyAlignment,
+                textLineSpacing = bodyLineSpacing
+            )
+        }
+    }
+
+    fun updateBody(next: TextFieldValue, recordUndo: Boolean = true) {
+        if (recordUndo && next != body) {
+            undoStack.add(body)
+            if (undoStack.size > 60) undoStack.removeAt(0)
+            redoStack.clear()
+        }
+        body = next
+        bodyStyles = noteTextStylesFromAnnotatedString(next.annotatedString)
+        syncBodyFormatBlock()
+    }
+
+    fun applyBodyStyle(transform: (NoteTextStyleRange) -> NoteTextStyleRange) {
+        val selection = body.selection
+        if (selection.min >= selection.max) return
         undoStack.add(body)
         if (undoStack.size > 60) undoStack.removeAt(0)
         redoStack.clear()
-        body = TextFieldValue(result.text, TextRange(result.selectionStart, result.selectionEnd))
+        bodyStyles = applyNoteTextStyle(body.text.length, bodyStyles, selection.min, selection.max, transform)
+        body = body.copy(annotatedString = styledNoteBody(body.text, bodyStyles))
+        syncBodyFormatBlock()
+    }
+
+    fun applyListPrefix(numbered: Boolean) {
+        val edit = insertChecklistPrefix(body.text, body.selection.start, body.selection.end, numbered, bodyStyles)
+        updateBody(TextFieldValue(styledNoteBody(edit.text, edit.styleRanges), TextRange(edit.selection)))
+    }
+
+    fun changeBody(result: TextEditResult) {
+        updateBody(TextFieldValue(result.text, TextRange(result.selectionStart, result.selectionEnd)))
     }
 
     fun addText(text: String) {
@@ -252,13 +303,13 @@ internal fun NoteEditorScreen(
                 EditorTopButton(Icons.Default.Undo, "Undo", editorPurple, onClick = {
                     if (undoStack.isNotEmpty()) {
                         redoStack.add(body)
-                        body = undoStack.removeAt(undoStack.lastIndex)
+                        updateBody(undoStack.removeAt(undoStack.lastIndex), recordUndo = false)
                     }
                 }, enabled = undoStack.isNotEmpty())
                 EditorTopButton(Icons.Default.Redo, "Redo", editorBlue, onClick = {
                     if (redoStack.isNotEmpty()) {
                         undoStack.add(body)
-                        body = redoStack.removeAt(redoStack.lastIndex)
+                        updateBody(redoStack.removeAt(redoStack.lastIndex), recordUndo = false)
                     }
                 }, enabled = redoStack.isNotEmpty())
                 EditorTopButton(Icons.Default.Done, "Save note", editorGold) {
@@ -305,21 +356,20 @@ internal fun NoteEditorScreen(
                 ) {
                     BasicTextField(
                         value = body,
-                        onValueChange = { next ->
-                            undoStack.add(body)
-                            if (undoStack.size > 60) undoStack.removeAt(0)
-                            redoStack.clear()
-                            body = next
-                        },
+                        onValueChange = { next -> updateBody(next) },
                         modifier = Modifier.fillMaxWidth().heightIn(min = if (blocks.isEmpty()) 180.dp else 56.dp).focusRequester(bodyFocus),
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = editorText, lineHeight = 25.sp),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            color = editorText,
+                            lineHeight = (20f * bodyLineSpacing).sp,
+                            textAlign = when (bodyAlignment) { "center" -> TextAlign.Center; "end" -> TextAlign.End; else -> TextAlign.Start }
+                        ),
                         cursorBrush = SolidColor(editorPurple),
                         decorationBox = { inner -> Box {
                             if (body.text.isBlank()) Text("Write something about your note…", color = editorPlaceholder, style = MaterialTheme.typography.bodyLarge)
                             inner()
                         } }
                     )
-                    blocks.forEach { block ->
+                    blocks.filterNot { it.kind == "body-formatting" }.forEach { block ->
                         key(block.id) {
                             RichContentCard(
                                 block = block,
@@ -417,9 +467,14 @@ internal fun NoteEditorScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 EditorToolbarItem(Icons.Default.TextFields, "Text", editorPurple) {
-                    bodyFocus.requestFocus(); keyboard?.show()
+                    textToolsOpen = true
+                    keyboard?.hide()
                 }
-                EditorToolbarItem(Icons.Default.CheckBox, "Checklist", editorBlue) { addText(if (body.text.isBlank()) "☐ " else "\n☐ ") }
+                EditorToolbarItem(Icons.Default.CheckBox, "Checklist", editorBlue) {
+                    val checklist = RichContentBlock(kind = "checklist", title = "Checklist", tasks = listOf(ChecklistTask()))
+                    val firstAttachment = blocks.indexOfFirst { it.kind != "checklist" && it.kind != "body-formatting" }
+                    blocks = if (firstAttachment < 0) blocks + checklist else blocks.toMutableList().apply { add(firstAttachment, checklist) }
+                }
                 EditorToolbarItem(Icons.Default.Alarm, "Reminder", editorPurple) {
                     val initial = Calendar.getInstance().apply { reminderAt?.let { timeInMillis = it } }
                     DatePickerDialog(context, { _, year, month, day ->
@@ -446,6 +501,34 @@ internal fun NoteEditorScreen(
                     }
                 }
             }
+        }
+
+        if (textToolsOpen) {
+            TextFormattingDialog(
+                selectionExists = body.selection.min < body.selection.max,
+                onStyle = { style -> applyBodyStyle { old -> when (style) {
+                    "bold" -> old.copy(bold = !old.bold)
+                    "italic" -> old.copy(italic = !old.italic)
+                    "underline" -> old.copy(underline = !old.underline)
+                    else -> old.copy(strike = !old.strike)
+                } } },
+                onFontSize = { size -> applyBodyStyle { it.copy(fontSizeSp = size) } },
+                onTextColor = { color -> applyBodyStyle { it.copy(textColor = color) } },
+                onHighlight = { color -> applyBodyStyle { it.copy(highlightColor = color) } },
+                onAlignment = { bodyAlignment = it; syncBodyFormatBlock() },
+                onList = ::applyListPrefix,
+                onLineSpacing = { bodyLineSpacing = it; syncBodyFormatBlock() },
+                onClear = {
+                    val selected = body.selection
+                    undoStack.add(body)
+                    if (undoStack.size > 60) undoStack.removeAt(0)
+                    redoStack.clear()
+                    bodyStyles = applyNoteTextStyle(body.text.length, bodyStyles, selected.min, selected.max) { NoteTextStyleRange(it.start, it.end) }
+                    body = body.copy(annotatedString = styledNoteBody(body.text, bodyStyles))
+                    syncBodyFormatBlock()
+                },
+                onDone = { textToolsOpen = false; bodyFocus.requestFocus() }
+            )
         }
 
         if (skinTarget != null) {
@@ -492,6 +575,130 @@ internal fun NoteEditorScreen(
 }
 
 @Composable
+private fun TextFormattingDialog(
+    selectionExists: Boolean,
+    onStyle: (String) -> Unit,
+    onFontSize: (Float) -> Unit,
+    onTextColor: (Int) -> Unit,
+    onHighlight: (Int?) -> Unit,
+    onAlignment: (String) -> Unit,
+    onList: (Boolean) -> Unit,
+    onLineSpacing: (Float) -> Unit,
+    onClear: () -> Unit,
+    onDone: () -> Unit
+) {
+    var fontSize by remember { mutableFloatStateOf(18f) }
+    val colors = listOf(0xFF202033.toInt(), 0xFFD32F2F.toInt(), 0xFFEF6C00.toInt(), 0xFF388E3C.toInt(), 0xFF1976D2.toInt(), 0xFF7B1FA2.toInt())
+    val highlights = listOf(0xFFFFF176.toInt(), 0xFFFFCC80.toInt(), 0xFFA5D6A7.toInt(), 0xFF90CAF9.toInt(), 0xFFE1BEE7.toInt(), 0xFFF8BBD0.toInt())
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Text formatting", fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (selectionExists) "Formatting applies to the selected note text." else "Select a word or sentence in the note first, then choose its formatting.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text("Font size · ${fontSize.toInt()} sp", style = MaterialTheme.typography.labelLarge)
+                Slider(value = fontSize, onValueChange = { fontSize = it }, valueRange = 12f..32f, steps = 9, enabled = selectionExists)
+                OutlinedButton(onClick = { onFontSize(fontSize) }, enabled = selectionExists, modifier = Modifier.fillMaxWidth()) { Text("Apply font size") }
+
+                Text("Style", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    listOf("B" to "bold", "I" to "italic", "U" to "underline", "S" to "strike").forEach { (label, value) ->
+                        FilterChip(
+                            selected = false,
+                            onClick = { onStyle(value) },
+                            enabled = selectionExists,
+                            label = { Text(label, fontWeight = if (value == "bold") FontWeight.Bold else FontWeight.Normal) }
+                        )
+                    }
+                }
+
+                Text("Text color", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    colors.forEach { color ->
+                        Box(Modifier.size(30.dp).clip(CircleShape).background(Color(color)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            .clickable(enabled = selectionExists) { onTextColor(color) })
+                    }
+                }
+
+                Text("Highlight", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    highlights.forEach { color ->
+                        Box(Modifier.size(28.dp).clip(CircleShape).background(Color(color)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            .clickable(enabled = selectionExists) { onHighlight(color) })
+                    }
+                    TextButton(onClick = { onHighlight(null) }, enabled = selectionExists) { Text("Clear") }
+                }
+
+                Text("Alignment", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("start" to "Left", "center" to "Center", "end" to "Right").forEach { (value, label) ->
+                        FilterChip(selected = false, onClick = { onAlignment(value) }, label = { Text(label) })
+                    }
+                }
+
+                Text("Lists", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { onList(false) }, modifier = Modifier.weight(1f)) { Text("•  Bullets") }
+                    OutlinedButton(onClick = { onList(true) }, modifier = Modifier.weight(1f)) { Text("1.  Numbered") }
+                }
+
+                Text("Line spacing", style = MaterialTheme.typography.labelLarge)
+                var spacing by remember { mutableFloatStateOf(1.25f) }
+                Slider(value = spacing, onValueChange = { spacing = it; onLineSpacing(it) }, valueRange = .9f..2f, steps = 10)
+                OutlinedButton(onClick = onClear, enabled = selectionExists, modifier = Modifier.fillMaxWidth()) { Text("Clear formatting from selection") }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDone) { Text("Done") } }
+    )
+}
+
+private fun styledNoteBody(text: String, ranges: List<NoteTextStyleRange>) = buildAnnotatedString {
+    append(text)
+    ranges.forEach { range ->
+        val start = range.start.coerceIn(0, text.length)
+        val end = range.end.coerceIn(start, text.length)
+        if (start >= end) return@forEach
+        val decorations = buildList {
+            if (range.underline) add(TextDecoration.Underline)
+            if (range.strike) add(TextDecoration.LineThrough)
+        }
+        addStyle(
+            SpanStyle(
+                fontWeight = if (range.bold) FontWeight.Bold else FontWeight.Normal,
+                fontStyle = if (range.italic) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                textDecoration = decorations.takeIf { it.isNotEmpty() }?.let(TextDecoration::combine),
+                fontSize = range.fontSizeSp?.sp ?: androidx.compose.ui.unit.TextUnit.Unspecified,
+                color = range.textColor?.let(::Color) ?: Color.Unspecified,
+                background = range.highlightColor?.let(::Color) ?: Color.Unspecified
+            ),
+            start,
+            end
+        )
+    }
+}
+
+private fun noteTextStylesFromAnnotatedString(text: androidx.compose.ui.text.AnnotatedString): List<NoteTextStyleRange> =
+    text.spanStyles.mapNotNull { span ->
+        if (span.start >= span.end) return@mapNotNull null
+        val style = span.item
+        NoteTextStyleRange(
+            start = span.start,
+            end = span.end,
+            bold = (style.fontWeight?.weight ?: 0) >= FontWeight.SemiBold.weight,
+            italic = style.fontStyle == androidx.compose.ui.text.font.FontStyle.Italic,
+            underline = style.textDecoration?.contains(TextDecoration.Underline) == true,
+            strike = style.textDecoration?.contains(TextDecoration.LineThrough) == true,
+            fontSizeSp = style.fontSize.takeIf { it.isSp }?.value,
+            textColor = style.color.takeIf { it.isSpecified }?.toArgb(),
+            highlightColor = style.background.takeIf { it.isSpecified }?.toArgb()
+        )
+    }.sortedBy { it.start }
+
+@Composable
 private fun EditorTopButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color, enabled: Boolean = true, onClick: () -> Unit) {
     IconButton(
         onClick = onClick,
@@ -535,6 +742,7 @@ private fun RichContentCard(
     var viewerOpen by remember(block.id) { mutableStateOf(false) }
     var editorOpen by remember(block.id) { mutableStateOf(false) }
     var confirmDetach by remember(block.id) { mutableStateOf(false) }
+    var imagePreview by remember(block.id, block.uri) { mutableStateOf<ImageBitmap?>(null) }
     Column(Modifier.fillMaxWidth().border(1.dp, editorLine, RoundedCornerShape(16.dp)).background(bg, RoundedCornerShape(16.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(when (block.kind) {
@@ -542,9 +750,10 @@ private fun RichContentCard(
                 "video" -> Icons.Default.Videocam
                 "audio" -> Icons.Default.GraphicEq
                 "sheet" -> Icons.Default.TableChart
+                "checklist" -> Icons.Default.Checklist
                 else -> Icons.Default.InsertDriveFile
             }, null, tint = if (block.kind == "video") editorBlue else editorPurple)
-            Text(when (block.kind) { "image" -> "Image"; "video" -> "Video"; "audio" -> "Audio"; "sheet" -> "Sheet"; else -> "Attachment" }, Modifier.weight(1f).padding(start = 8.dp), color = editorText, fontWeight = FontWeight.SemiBold)
+            Text(when (block.kind) { "image" -> "Image"; "video" -> "Video"; "audio" -> "Audio"; "sheet" -> "Sheet"; "checklist" -> "Checklist"; else -> "Attachment" }, Modifier.weight(1f).padding(start = 8.dp), color = editorText, fontWeight = FontWeight.SemiBold)
             if (block.kind == "sheet") TextButton(onClick = onSkin, contentPadding = PaddingValues(horizontal = 8.dp)) { Icon(Icons.Default.Palette, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(4.dp)); Text("Skins") }
             if (block.uri != null && block.kind == "image") {
                 TextButton(onClick = { editorOpen = true }, contentPadding = PaddingValues(horizontal = 5.dp), modifier = Modifier.height(40.dp)) {
@@ -565,32 +774,36 @@ private fun RichContentCard(
             IconButton(onClick = { if (block.kind == "image") confirmDetach = true else onRemove() }, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Close, "Remove content", tint = editorMuted, modifier = Modifier.size(18.dp)) }
         }
 
-        if (block.kind == "image" && block.uri != null) EmbeddedImage(block.uri) { viewerOpen = true }
-        if (block.kind == "video" && block.uri != null) EmbeddedVideo(block.uri)
-        if (block.kind == "audio" && block.uri != null) EmbeddedAudio(block.uri, block.title)
+        if (block.kind == "checklist") {
+            ChecklistContent(block, onChange)
+        } else {
+            if (block.kind == "image" && block.uri != null) EmbeddedImage(block.uri, onOpen = { viewerOpen = true }, onImageLoaded = { imagePreview = it })
+            if (block.kind == "video" && block.uri != null) EmbeddedVideo(block.uri)
+            if (block.kind == "audio" && block.uri != null) EmbeddedAudio(block.uri, block.title)
 
-        OutlinedTextField(
-            value = block.title,
-            onValueChange = { onChange(block.copy(title = it)) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text(if (block.kind == "sheet") "Sheet title" else "Title") },
-            colors = editorFieldColors()
-        )
-        OutlinedTextField(
-            value = block.description,
-            onValueChange = { onChange(block.copy(description = it)) },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 1,
-            maxLines = 3,
-            label = { Text("Description") },
-            colors = editorFieldColors()
-        )
+            OutlinedTextField(
+                value = block.title,
+                onValueChange = { onChange(block.copy(title = it)) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text(if (block.kind == "sheet") "Sheet title" else "Title") },
+                colors = editorFieldColors()
+            )
+            OutlinedTextField(
+                value = block.description,
+                onValueChange = { onChange(block.copy(description = it)) },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 1,
+                maxLines = 3,
+                label = { Text("Description") },
+                colors = editorFieldColors()
+            )
 
-        if (block.kind == "sheet") {
-            SheetGrid(block = block, onChange = onChange, onPaste = onPaste)
-        } else if (block.uri != null) {
-            Text("${block.mimeType.ifBlank { block.kind }} · linked from this device", color = editorMuted, style = MaterialTheme.typography.labelSmall)
+            if (block.kind == "sheet") {
+                SheetGrid(block = block, onChange = onChange, onPaste = onPaste)
+            } else if (block.uri != null) {
+                Text("${block.mimeType.ifBlank { block.kind }} · linked from this device", color = editorMuted, style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
     if (viewerOpen && block.uri != null && block.kind in setOf("image", "video")) {
@@ -600,6 +813,7 @@ private fun RichContentCard(
         ImageEditorDialog(
             uriText = block.uri,
             mimeType = block.mimeType,
+            initialPreview = imagePreview,
             onDismiss = { editorOpen = false },
             onSaved = { uri, mime ->
                 onChange(block.copy(uri = uri, mimeType = mime))
@@ -615,6 +829,82 @@ private fun RichContentCard(
             confirmButton = { TextButton(onClick = { confirmDetach = false; onRemove() }) { Text("Remove") } },
             dismissButton = { TextButton(onClick = { confirmDetach = false }) { Text("Cancel") } }
         )
+    }
+}
+
+@Composable
+private fun ChecklistContent(block: RichContentBlock, onChange: (RichContentBlock) -> Unit) {
+    var newTask by remember(block.id) { mutableStateOf("") }
+    val completed = block.tasks.count { it.checked }
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("$completed of ${block.tasks.size} completed", Modifier.weight(1f), color = editorMuted, style = MaterialTheme.typography.labelMedium)
+            FilterChip(selected = block.checklistStyle == "square", onClick = { onChange(block.copy(checklistStyle = "square")) }, label = { Text("Square") })
+            Spacer(Modifier.width(5.dp))
+            FilterChip(selected = block.checklistStyle == "circle", onClick = { onChange(block.copy(checklistStyle = "circle")) }, label = { Text("Circle") })
+        }
+        block.tasks.forEachIndexed { index, task ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (block.checklistStyle == "circle") {
+                    IconButton(onClick = {
+                        onChange(block.copy(tasks = setChecklistTaskChecked(block.tasks, task.id, !task.checked)))
+                    }, modifier = Modifier.size(42.dp)) {
+                        Icon(if (task.checked) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked, if (task.checked) "Mark ${task.text} incomplete" else "Mark ${task.text} complete", tint = if (task.checked) editorPurple else editorMuted)
+                    }
+                } else {
+                    Checkbox(
+                        checked = task.checked,
+                        onCheckedChange = { checked -> onChange(block.copy(tasks = setChecklistTaskChecked(block.tasks, task.id, checked))) },
+                        colors = CheckboxDefaults.colors(checkedColor = editorPurple, uncheckedColor = editorMuted)
+                    )
+                }
+                BasicTextField(
+                    value = task.text,
+                    onValueChange = { value -> onChange(block.copy(tasks = block.tasks.mapIndexed { i, item -> if (i == index) item.copy(text = value) else item })) },
+                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = editorText,
+                        textDecoration = if (task.checked) TextDecoration.LineThrough else TextDecoration.None
+                    ),
+                    cursorBrush = SolidColor(editorPurple),
+                    decorationBox = { inner -> Box {
+                        if (task.text.isBlank()) Text("Task ${index + 1}", color = editorPlaceholder, style = MaterialTheme.typography.bodyMedium)
+                        inner()
+                    } }
+                )
+                IconButton(onClick = {
+                    if (index > 0) onChange(block.copy(tasks = block.tasks.toMutableList().apply { add(index - 1, removeAt(index)) }))
+                }, enabled = index > 0, modifier = Modifier.size(34.dp)) { Icon(Icons.Default.KeyboardArrowUp, "Move task up", tint = editorMuted) }
+                IconButton(onClick = {
+                    if (index < block.tasks.lastIndex) onChange(block.copy(tasks = block.tasks.toMutableList().apply { add(index + 1, removeAt(index)) }))
+                }, enabled = index < block.tasks.lastIndex, modifier = Modifier.size(34.dp)) { Icon(Icons.Default.KeyboardArrowDown, "Move task down", tint = editorMuted) }
+                IconButton(onClick = { onChange(block.copy(tasks = block.tasks.filterNot { it.id == task.id })) }, modifier = Modifier.size(34.dp)) {
+                    Icon(Icons.Default.DeleteOutline, "Delete task ${task.text.ifBlank { index + 1 }}", tint = editorMuted, modifier = Modifier.size(19.dp))
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = newTask,
+                onValueChange = { newTask = it },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                label = { Text("Add a new item…") },
+                colors = editorFieldColors()
+            )
+            IconButton(onClick = {
+                val clean = newTask.trim()
+                if (clean.isNotEmpty()) {
+                    onChange(block.copy(tasks = block.tasks + ChecklistTask(text = clean)))
+                    newTask = ""
+                }
+            }, enabled = newTask.isNotBlank(), modifier = Modifier.size(46.dp)) { Icon(Icons.Default.Add, "Add checklist task", tint = editorPurple) }
+        }
+        if (completed > 0) {
+            TextButton(onClick = { onChange(block.copy(tasks = clearCompletedChecklistTasks(block.tasks))) }, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Clear completed")
+            }
+        }
     }
 }
 
@@ -698,9 +988,10 @@ private fun SheetGrid(block: RichContentBlock, onChange: (RichContentBlock) -> U
 }
 
 @Composable
-private fun EmbeddedImage(uriText: String, onOpen: () -> Unit) {
+private fun EmbeddedImage(uriText: String, onOpen: () -> Unit, onImageLoaded: (ImageBitmap?) -> Unit) {
     val context = LocalContext.current
     val image by produceImage(uriText, context)
+    LaunchedEffect(image) { onImageLoaded(image) }
     if (image != null) {
         Image(image!!, contentDescription = "View embedded image", modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).clip(RoundedCornerShape(10.dp)).background(editorMediaCanvas).clickable(onClick = onOpen), contentScale = ContentScale.Fit)
     } else {

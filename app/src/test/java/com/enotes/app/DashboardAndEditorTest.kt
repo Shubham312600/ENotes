@@ -23,6 +23,52 @@ class DashboardAndEditorTest {
     }
 
     @Test
+    fun selectedNoteFormattingCanBeCombinedAndClearedByRange() {
+        val bold = listOf(NoteTextStyleRange(0, 5, bold = true))
+        val combined = applyNoteTextStyle(5, bold, 2, 4) { it.copy(italic = true) }
+        assertEquals(
+            listOf(
+                NoteTextStyleRange(0, 2, bold = true),
+                NoteTextStyleRange(2, 4, bold = true, italic = true),
+                NoteTextStyleRange(4, 5, bold = true)
+            ),
+            combined
+        )
+        assertEquals(
+            listOf(NoteTextStyleRange(0, 2, bold = true), NoteTextStyleRange(4, 5, bold = true)),
+            applyNoteTextStyle(5, combined, 2, 4) { NoteTextStyleRange(it.start, it.end) }
+        )
+    }
+
+    @Test
+    fun numberedListPrefixesEachSelectedLineAndMovesExistingStyleRanges() {
+        val edit = insertChecklistPrefix(
+            text = "one\ntwo\nthree",
+            selectionStart = 0,
+            selectionEnd = 13,
+            numbered = true,
+            styles = listOf(NoteTextStyleRange(0, 3, bold = true))
+        )
+
+        assertEquals("1. one\n2. two\n3. three", edit.text)
+        assertEquals(22, edit.selection)
+        assertEquals(listOf(NoteTextStyleRange(3, 6, bold = true)), edit.styleRanges)
+    }
+
+    @Test
+    fun checklistRowsCanBeCheckedUncheckedAndCleared() {
+        val tasks = listOf(
+            ChecklistTask(id = "one", text = "First"),
+            ChecklistTask(id = "two", text = "Second", checked = true)
+        )
+
+        assertEquals(tasks[0].copy(checked = true), setChecklistTaskChecked(tasks, "one", true).first())
+        assertEquals(tasks[1].copy(checked = false), setChecklistTaskChecked(tasks, "two", false).last())
+        assertEquals(listOf(tasks[0]), clearCompletedChecklistTasks(tasks))
+        assertEquals(tasks, setChecklistTaskChecked(tasks, "missing", true))
+    }
+
+    @Test
     fun listMarkerStartsAtTheCurrentLineAndKeepsCursorAfterMarker() {
         assertEquals(TextEditResult("First\n- second", 11, 11), prefixCurrentLine("First\nsecond", 9, "- "))
     }
