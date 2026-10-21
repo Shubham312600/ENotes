@@ -104,12 +104,12 @@ internal fun ImageEditorDialog(
     }
 
     val sourceLoad by produceState(
-        initialValue = ImageLoadResult(null, null, false),
-        key1 = uriText,
-        key2 = initialPreview,
-        key3 = previewMaxDimension,
-        key4 = previewRetryToken,
-        key5 = mimeType
+        ImageLoadResult(null, null, false),
+        uriText,
+        initialPreview,
+        previewMaxDimension,
+        previewRetryToken,
+        mimeType
     ) {
         value = ImageLoadResult(null, null, false)
         var pendingResult: ImageLoadResult? = null
