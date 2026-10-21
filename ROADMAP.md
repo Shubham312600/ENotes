@@ -111,13 +111,13 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 - [x] CI run #39 passed unit tests, Android debug build, and APK upload at commit `52c061c` (artifact: 16,411,380 bytes; expires 2026-11-03). This workstation has no Java, Gradle, or Android SDK.
 - [ ] Verify row selection, deletion, and sheet persistence on a device or emulator.
 
-## Image viewer and editing workspace (2026-10-21; CI pending)
+## Image viewer and editing workspace (2026-10-21; run #43 passed, device verification pending)
 - [x] Image attachment cards now expose separate Edit and View controls; tapping the preview opens the same full-screen viewer. Video keeps its compact viewer control.
 - [x] Image detach asks for confirmation and explicitly leaves the source file on the device untouched.
 - [x] The full-screen image viewer supports pinch zoom, bounded pan, and double-tap zoom; the existing video viewer remains separate.
 - [x] Added a dedicated editing dialog with rotate, horizontal/vertical flip, centered aspect-ratio crop presets, brightness, contrast, saturation, warmth, six adjustable filters, before/after preview, pen/arrow/text markup, grouped slider undo/redo, and reset.
 - [x] Export creates a separate PNG or JPEG in Pictures/ENotes and updates only the selected image block URI when export succeeds. Cancel leaves the original URI and note draft intact.
-- [x] Added JVM tests for viewer pan bounds, crop geometry, and edit history; CI has not run on this change yet.
+- [x] Added JVM tests for viewer pan bounds, crop geometry, and edit history; CI run #43 passed all 10 unit tests, the Android debug APK build, and artifact upload.
 - [ ] Freeform draggable crop handles, exposure/tint/highlights/shadows/sharpness/blur/vignette, shape/highlighter/sticker tools, movable annotation selection, and editor-canvas zoom/pan are not implemented; the editor currently exposes only the working tools listed above.
 - [ ] Android 8/9 gallery export permission handling and EXIF orientation preservation have not been verified.
 - [ ] Run the workflow and verify viewer gestures, export/reopen, note draft preservation, and Light/Dark appearance on a device or emulator. No runtime screenshot or device verification has been performed.
@@ -145,11 +145,11 @@ Status rule: only mark a feature **verified** after implementation and a relevan
 ## Release / delivery
 - [x] GitHub Actions debug APK build workflow and artifact upload.
 - [ ] Add Gradle wrapper and pin build tooling reproducibly.
-- [x] Pull-request CI runs JVM tests before the Android debug build; run #26 passed.
+- [x] Pull-request CI runs JVM tests before the Android debug build; run #43 passed for commit `7b157d3067e171b9e9b6f282bae054e68cb65daa`.
 - [ ] Device/emulator smoke tests: launch, create/edit/search, archive/trash/restore, backup export/import, theme.
 - [ ] Verify release signing and release APK/AAB separately from debug artifacts.
 - [ ] Review privacy policy, data deletion/export, permissions, and store readiness.
 
 ## Current honest release status
-The repository has a buildable **prototype**, not the complete product. The dashboard correction has a successful debug APK build and uploaded artifact. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
+The repository has a buildable **prototype**, not the complete product. The dashboard correction and image viewer/editor passed CI run #43: JVM tests, debug APK build, and artifact upload succeeded. The APK is 16,999,241 bytes (SHA-256 `3F9A716A43FDC83CD551B75FE0D854B891A318E8FAE994D85A09A682FABEFEFF`); the GitHub artifact expires 2026-11-04. Runtime behavior and screenshot parity remain unchecked until verified on a device. Cloud sync, Google Drive, voice recording, and AI require provider configuration; account and reminder features are not connected.
 
