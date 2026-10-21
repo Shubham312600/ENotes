@@ -92,10 +92,16 @@ internal fun createImageAnnotation(
     tool: String,
     points: List<ImagePoint>,
     color: Int,
-    text: String = ""
+    text: String = "",
+    highlighterOpacity: Float = .4f
 ): ImageAnnotation = when (tool) {
     "Arrow" -> ImageAnnotation("arrow", points, color = color)
-    "Highlighter" -> ImageAnnotation("highlighter", points, color = (color and 0x00FFFFFF) or (0x66 shl 24), width = .045f)
+    "Highlighter" -> ImageAnnotation(
+        "highlighter",
+        points,
+        color = (color and 0x00FFFFFF) or ((highlighterOpacity.coerceIn(.08f, .9f) * 255).roundToInt() shl 24),
+        width = .045f
+    )
     "Text" -> ImageAnnotation("text", points, text = text, color = color, width = .07f)
     else -> ImageAnnotation("pen", points, color = color)
 }

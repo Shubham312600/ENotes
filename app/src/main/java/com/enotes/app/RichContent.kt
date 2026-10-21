@@ -72,6 +72,60 @@ internal fun applyNoteTextStyle(
     }
 }
 
+/** Keeps saved style ranges anchored to the same text when an editor callback changes the body. */
+internal fun remapNoteTextStylesForTextEdit(
+    oldText: String,
+    newText: String,
+    styles: List<NoteTextStyleRange>
+): List<NoteTextStyleRange> {
+    if (oldText == newText || styles.isEmpty()) return styles
+
+    var editStart = 0
+    val sharedLength = minOf(oldText.length, newText.length)
+    while (editStart < sharedLength && oldText[editStart] == newText[editStart]) editStart++
+
+    var oldEditEnd = oldText.length
+    var newEditEnd = newText.length
+    while (oldEditEnd > editStart && newEditEnd > editStart && oldText[oldEditEnd - 1] == newText[newEditEnd - 1]) {
+        oldEditEnd--
+        newEditEnd--
+    }
+
+    val insertedLength = newEditEnd - editStart
+    val delta = insertedLength - (oldEditEnd - editStart)
+    val inherited = styles.firstOrNull { it.start <= editStart && it.end > editStart }
+        ?: styles.firstOrNull { it.start < oldEditEnd && it.end > editStart }
+        ?: styles.firstOrNull { it.start < editStart && it.end >= editStart }
+    val result = buildList {
+        styles.forEach { style ->
+            val start = style.start.coerceIn(0, oldText.length)
+            val end = style.end.coerceIn(start, oldText.length)
+            if (start >= end) return@forEach
+            if (start < editStart) {
+                val leftEnd = minOf(end, editStart)
+                if (start < leftEnd) add(style.copy(start = start, end = leftEnd))
+            }
+            if (end > oldEditEnd) {
+                val rightStart = maxOf(start, oldEditEnd) + delta
+                val rightEnd = end + delta
+                if (rightStart < rightEnd) add(style.copy(start = rightStart, end = rightEnd))
+            }
+        }
+        if (insertedLength > 0 && inherited != null) {
+            add(inherited.copy(start = editStart, end = newEditEnd))
+        }
+    }.sortedBy { it.start }
+
+    return buildList {
+        result.forEach { range ->
+            val previous = lastOrNull()
+            if (previous != null && previous.end == range.start && previous.copy(start = range.start, end = range.end) == range) {
+                this[lastIndex] = previous.copy(end = range.end)
+            } else add(range)
+        }
+    }
+}
+
 internal data class ChecklistPrefixEdit(
     val text: String,
     val selection: Int,

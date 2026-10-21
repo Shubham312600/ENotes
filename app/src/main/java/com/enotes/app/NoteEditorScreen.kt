@@ -232,8 +232,12 @@ internal fun NoteEditorScreen(
         }
     }
 
-    fun updateBody(next: TextFieldValue, recordUndo: Boolean = true) {
-        val contentChanged = next.text != body.text || next.annotatedString != body.annotatedString
+    fun updateBody(
+        next: TextFieldValue,
+        recordUndo: Boolean = true,
+        styleRanges: List<NoteTextStyleRange>? = null
+    ) {
+        val contentChanged = next.text != body.text
         if (recordUndo && contentChanged) {
             undoStack.add(body)
             if (undoStack.size > 60) undoStack.removeAt(0)
@@ -241,8 +245,8 @@ internal fun NoteEditorScreen(
         }
         if (next.text != body.text) formattingSelection = TextRange.Zero
         if (next.selection.min < next.selection.max) formattingSelection = next.selection
-        body = next
-        bodyStyles = noteTextStylesFromAnnotatedString(next.annotatedString)
+        bodyStyles = styleRanges ?: remapNoteTextStylesForTextEdit(body.text, next.text, bodyStyles)
+        body = TextFieldValue(styledNoteBody(next.text, bodyStyles), next.selection, next.composition)
         syncBodyFormatBlock()
     }
 
@@ -261,7 +265,7 @@ internal fun NoteEditorScreen(
     fun applyListPrefix(numbered: Boolean) {
         val selection = formattingSelection.takeIf { it.min < it.max } ?: body.selection
         val edit = insertChecklistPrefix(body.text, selection.min, selection.max, numbered, bodyStyles)
-        updateBody(TextFieldValue(styledNoteBody(edit.text, edit.styleRanges), TextRange(edit.selection)))
+        updateBody(TextFieldValue(edit.text, TextRange(edit.selection)), styleRanges = edit.styleRanges)
     }
 
     fun changeBody(result: TextEditResult) {
@@ -311,13 +315,15 @@ internal fun NoteEditorScreen(
                 EditorTopButton(Icons.Default.Undo, "Undo", editorPurple, onClick = {
                     if (undoStack.isNotEmpty()) {
                         redoStack.add(body)
-                        updateBody(undoStack.removeAt(undoStack.lastIndex), recordUndo = false)
+                        val restored = undoStack.removeAt(undoStack.lastIndex)
+                        updateBody(restored, recordUndo = false, styleRanges = noteTextStylesFromAnnotatedString(restored.annotatedString))
                     }
                 }, enabled = undoStack.isNotEmpty())
                 EditorTopButton(Icons.Default.Redo, "Redo", editorBlue, onClick = {
                     if (redoStack.isNotEmpty()) {
                         undoStack.add(body)
-                        updateBody(redoStack.removeAt(redoStack.lastIndex), recordUndo = false)
+                        val restored = redoStack.removeAt(redoStack.lastIndex)
+                        updateBody(restored, recordUndo = false, styleRanges = noteTextStylesFromAnnotatedString(restored.annotatedString))
                     }
                 }, enabled = redoStack.isNotEmpty())
                 EditorTopButton(Icons.Default.Done, "Save note", editorGold) {
@@ -367,7 +373,7 @@ internal fun NoteEditorScreen(
                         onValueChange = { next ->
                             val continued = continueNumberedListOnNewline(body.text, next.text, next.selection.start, bodyStyles)
                             if (continued == null) updateBody(next)
-                            else updateBody(TextFieldValue(styledNoteBody(continued.text, continued.styleRanges), TextRange(continued.selection)))
+                            else updateBody(TextFieldValue(continued.text, TextRange(continued.selection)), styleRanges = continued.styleRanges)
                         },
                         modifier = Modifier.fillMaxWidth().heightIn(min = if (blocks.isEmpty()) 180.dp else 56.dp).focusRequester(bodyFocus),
                         textStyle = MaterialTheme.typography.bodyLarge.copy(

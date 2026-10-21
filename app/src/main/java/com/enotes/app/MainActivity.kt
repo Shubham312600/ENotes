@@ -30,6 +30,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
@@ -76,8 +77,19 @@ class MainActivity : ComponentActivity() {
                 "dark" -> true
                 else -> isSystemInDarkTheme()
             }
-            val scheme = if (dark) darkColorScheme(primary = Color(0xFFB9B7FF), secondary = Color(0xFFC6C3FF))
-                else lightColorScheme(primary = Color(0xFF5935E8), secondary = Color(0xFF625BCE), background = Color(0xFFFBF9FF), surface = Color.White)
+            val scheme = if (dark) darkColorScheme(
+                primary = Color(0xFFC5B7FF), onPrimary = Color(0xFF25164B),
+                primaryContainer = Color(0xFF403269), onPrimaryContainer = Color(0xFFEAE2FF),
+                secondary = Color(0xFF9BD9C7), onSecondary = Color(0xFF00382D),
+                secondaryContainer = Color(0xFF214B40), onSecondaryContainer = Color(0xFFC0EFE0),
+                background = Color(0xFF121018), onBackground = Color(0xFFF4EFF8),
+                surface = Color(0xFF1B1722), onSurface = Color(0xFFF4EFF8),
+                surfaceVariant = Color(0xFF292530), onSurfaceVariant = Color(0xFFC9C2D2),
+                outline = Color(0xFF938B9C), outlineVariant = Color(0xFF494350)
+            ) else lightColorScheme(
+                primary = Color(0xFF5935E8), secondary = Color(0xFF625BCE),
+                background = Color(0xFFFBF9FF), surface = Color.White
+            )
             MaterialTheme(colorScheme = scheme) {
                 NotesHome(vm, themeMode) { mode ->
                     themeMode = mode
@@ -218,7 +230,7 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
         }, actions = { if(tab == Tab.NOTES) {
             TextButton(onClick = { quickMessage = "Notes are stored on this device. Cloud sync is not connected." }, contentPadding = PaddingValues(horizontal = 4.dp)) { Icon(Icons.Default.CloudOff, "Local storage", tint = Color(0xFF31865B)); Spacer(Modifier.width(3.dp)); Text("Local", style = MaterialTheme.typography.labelSmall) }
             IconButton(onClick = { quickMessage = "Reminders and notifications are not available in this build." }) { Icon(Icons.Default.NotificationsNone, "Notifications") }
-            IconButton(onClick = { quickMessage = "ENotes is using local storage. Account sign-in is not configured." }, modifier = Modifier.size(42.dp).background(MaterialTheme.colorScheme.primary, CircleShape)) { Icon(Icons.Default.Person, "Account", tint = Color.White) }
+            IconButton(onClick = { quickMessage = "ENotes is using local storage. Account sign-in is not configured." }, modifier = Modifier.size(42.dp).background(MaterialTheme.colorScheme.primary, CircleShape)) { Icon(Icons.Default.Person, "Account", tint = MaterialTheme.colorScheme.onPrimary) }
         } }) },
         bottomBar = { if (!editor) NavigationBar {
             NavigationBarItem(tab == Tab.NOTES, { tab = Tab.NOTES; query = "" }, { Icon(Icons.Default.StickyNote2, null) }, label = { Text("Notes", maxLines=1) })
@@ -227,7 +239,7 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
             NavigationBarItem(tab == Tab.SETTINGS, { tab = Tab.SETTINGS; query = "" }, { Icon(Icons.Default.Settings, null) }, label = { Text("Settings", maxLines=1) })
             NavigationBarItem(tab == Tab.MORE, { tab = Tab.MORE; query = "" }, { Icon(Icons.Default.Apps, null) }, label = { Text("More", maxLines=1) })
         } },
-        floatingActionButton = { if (!editor && tab == Tab.NOTES) Box { FloatingActionButton(onClick = { fabMenu = true }, shape=CircleShape, containerColor=Color(0xFF5935E8), contentColor=Color.White) { Icon(Icons.Default.Add, "Create") }; DropdownMenu(expanded = fabMenu, onDismissRequest = { fabMenu = false }) {
+        floatingActionButton = { if (!editor && tab == Tab.NOTES) Box { FloatingActionButton(onClick = { fabMenu = true }, shape=CircleShape, containerColor=MaterialTheme.colorScheme.primary, contentColor=MaterialTheme.colorScheme.onPrimary) { Icon(Icons.Default.Add, "Create") }; DropdownMenu(expanded = fabMenu, onDismissRequest = { fabMenu = false }) {
             DropdownMenuItem(text = { Text("New note") }, leadingIcon = { Icon(Icons.Default.NoteAdd, null) }, onClick = { fabMenu=false; editing=null; editor=true })
             DropdownMenuItem(text = { Text("New folder") }, leadingIcon = { Icon(Icons.Default.CreateNewFolder, null) }, onClick = { fabMenu=false; createFolder=true })
         } } }
@@ -508,7 +520,7 @@ private fun HomeDashboard(
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search notes") },
                     trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Clear search") } }
                 )
-                Surface(Modifier.size(52.dp).clickable(onClick = onFilterChange), shape = RoundedCornerShape(18.dp), color = Color(0xFFF0EAFE), contentColor = MaterialTheme.colorScheme.primary) {
+                Surface(Modifier.size(52.dp).clickable(onClick = onFilterChange), shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Tune, contentDescription = "Filter notes", modifier = Modifier.size(25.dp))
                         if (pinnedOnly || categoryFilter != "All Notes" || folderFilter != null) Box(Modifier.align(Alignment.TopEnd).padding(8.dp).size(7.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
@@ -605,9 +617,11 @@ private fun NoteCard(
 ) {
     var menuExpanded by remember(note.id) { mutableStateOf(false) }
     val date = remember(note.updatedAt) { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(note.updatedAt)) }
-    Card(Modifier.fillMaxWidth().then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier), shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, Color(0xFFEAE8F2)), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    val darkTheme = MaterialTheme.colorScheme.background.luminance() < .5f
+    val labelTint = if (darkTheme) readableTintOnDark(noteLabelColor(note.labelColor)) else noteLabelColor(note.labelColor)
+    Card(Modifier.fillMaxWidth().then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier), shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(11.dp), verticalAlignment = Alignment.Top) {
-            val noteTint = noteLabelColor(note.labelColor)
+            val noteTint = labelTint
             Box(Modifier.size(54.dp).background(noteTint.copy(alpha = 0.12f), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
                 Icon(if (note.attachmentUri != null) Icons.Default.InsertDriveFile else Icons.Default.Description, null, tint = noteTint, modifier = Modifier.size(28.dp))
             }
@@ -615,14 +629,14 @@ private fun NoteCard(
                 Text(note.title.ifBlank { "Untitled note" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(note.body.ifBlank { if (note.attachmentUri != null) "Attached document" else "No additional text" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(if (onCategory != null) Modifier.clickable(onClick = onCategory) else Modifier, color = noteTint.copy(alpha = 0.13f), shape = RoundedCornerShape(50)) {
+                    Surface(if (onCategory != null) Modifier.clickable(onClick = onCategory) else Modifier, color = noteTint.copy(alpha = if (darkTheme) .2f else .13f), shape = RoundedCornerShape(50)) {
                         Text(note.category, Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = noteTint)
                     }
-                    if (note.folder != null && onFolder != null) Surface(Modifier.clickable(onClick = onFolder), color = Color(0xFFF5F4FA), shape = RoundedCornerShape(50)) {
+                    if (note.folder != null && onFolder != null) Surface(Modifier.clickable(onClick = onFolder), color = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant, shape = RoundedCornerShape(50)) {
                         Text(note.folder, Modifier.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (note.attachmentUri != null) Icon(Icons.Default.AttachFile, "Has attachment", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
-                    if (note.priority != "Medium") Text(note.priority, style = MaterialTheme.typography.labelSmall, color = if (note.priority == "High") Color(0xFFB34B28) else MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (note.priority != "Medium") Text(note.priority, style = MaterialTheme.typography.labelSmall, color = if (note.priority == "High") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     Icon(Icons.Default.CalendarToday, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(14.dp))
@@ -742,7 +756,7 @@ private fun MoreScreen(modifier: Modifier, onCreateNote: () -> Unit, onCreateFol
 
 @Composable
 private fun MoreAction(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, detail: String, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, Color(0xFFEAE8F2)), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick), shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(25.dp))
             Column(Modifier.weight(1f)) {
@@ -752,6 +766,17 @@ private fun MoreAction(icon: androidx.compose.ui.graphics.vector.ImageVector, ti
             Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.outline)
         }
     }
+}
+
+private fun readableTintOnDark(color: Color): Color {
+    if (color.luminance() >= .22f) return color
+    val lift = .52f
+    return Color(
+        red = color.red + (1f - color.red) * lift,
+        green = color.green + (1f - color.green) * lift,
+        blue = color.blue + (1f - color.blue) * lift,
+        alpha = color.alpha
+    )
 }
 
 @Composable

@@ -53,6 +53,21 @@ class DashboardAndEditorTest {
     }
 
     @Test
+    fun noteTextStylesSurvivePlainEditorCallbacksAndTrackNearbyTextEdits() {
+        val styles = listOf(NoteTextStyleRange(0, 5, bold = true, textColor = 0xFF1976D2.toInt()))
+
+        assertEquals(styles, remapNoteTextStylesForTextEdit("Hello! world", "Hello! world", styles))
+        assertEquals(
+            listOf(NoteTextStyleRange(0, 6, bold = true, textColor = 0xFF1976D2.toInt())),
+            remapNoteTextStylesForTextEdit("Hello world", "Hello! world", styles)
+        )
+        assertEquals(
+            listOf(NoteTextStyleRange(10, 15, bold = true, textColor = 0xFF1976D2.toInt())),
+            remapNoteTextStylesForTextEdit("Hello world", "New Hello world", listOf(NoteTextStyleRange(6, 11, bold = true, textColor = 0xFF1976D2.toInt())))
+        )
+    }
+
+    @Test
     fun numberedListPrefixesEachSelectedLineAndMovesExistingStyleRanges() {
         val edit = insertChecklistPrefix(
             text = "one\ntwo\nthree",
@@ -152,6 +167,8 @@ class DashboardAndEditorTest {
         assertEquals(ImageAnnotation("pen", points, color = blue), createImageAnnotation("Pen", points, blue))
         assertEquals(ImageAnnotation("arrow", points, color = blue), createImageAnnotation("Arrow", points, blue))
         assertEquals(ImageAnnotation("highlighter", points, color = 0x661E88E5.toInt(), width = .045f), createImageAnnotation("Highlighter", points, blue))
+        assertEquals(0x331E88E5.toInt(), createImageAnnotation("Highlighter", points, blue, highlighterOpacity = .2f).color)
+        assertEquals(0xCC1E88E5.toInt(), createImageAnnotation("Highlighter", points, blue, highlighterOpacity = .8f).color)
         assertEquals(ImageAnnotation("text", listOf(ImagePoint(.5f, .5f)), text = "Marked", color = blue, width = .07f), createImageAnnotation("Text", listOf(ImagePoint(.5f, .5f)), blue, "Marked"))
     }
 

@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
@@ -106,6 +107,7 @@ internal fun QuickActionsSection(
     preferences: DashboardPreferences,
     onEdit: () -> Unit
 ) {
+    val darkTheme = MaterialTheme.colorScheme.background.luminance() < .5f
     val ordered = remember(actions, preferences.actionOrder, preferences.hiddenActions, preferences.pinnedActions) {
         val byId = actions.associateBy(HomeAction::id)
         (preferences.actionOrder + actions.map(HomeAction::id)).distinct()
@@ -130,17 +132,18 @@ internal fun QuickActionsSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(ordered, key = { it.id }) { action ->
+                val cardColor = if (darkTheme) blendDashboardTint(MaterialTheme.colorScheme.surfaceVariant, action.tint, .14f) else action.tint.copy(alpha = .09f)
                 Card(
                     Modifier.width(104.dp).heightIn(min = 122.dp).clickable(onClick = action.onClick),
                     shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = action.tint.copy(alpha = 0.09f))
+                    colors = CardDefaults.cardColors(containerColor = cardColor, contentColor = MaterialTheme.colorScheme.onSurface)
                 ) {
                     Column(
                         Modifier.fillMaxSize().padding(horizontal = 5.dp, vertical = 9.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        Icon(action.icon, action.title, tint = action.tint, modifier = Modifier.size(27.dp))
+                        Icon(action.icon, action.title, tint = if (darkTheme) readableDashboardTint(action.tint) else action.tint, modifier = Modifier.size(27.dp))
                         Spacer(Modifier.height(5.dp))
                         Text(action.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(action.subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -159,6 +162,7 @@ internal fun QuickAccessSection(
     onEdit: () -> Unit,
     onSelect: (String) -> Unit
 ) {
+    val darkTheme = MaterialTheme.colorScheme.background.luminance() < .5f
     val byId = remember(options) { options.associateBy(DashboardOption::id) }
     val ordered = remember(options, preferences.quickAccessOrder, preferences.hiddenQuickAccess, preferences.pinnedQuickAccess) {
         val fullOrder = preferences.quickAccessOrder.distinct()
@@ -202,16 +206,24 @@ internal fun QuickAccessSection(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(ordered, key = DashboardOption::id) { option ->
+                    val iconTint = when {
+                        option.selected -> MaterialTheme.colorScheme.primary
+                        darkTheme -> readableDashboardTint(option.tint)
+                        else -> option.tint
+                    }
                     Card(
                         Modifier.width(itemWidth).heightIn(min = 100.dp).clickable { onSelect(option.id) },
                         shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(1.dp, if (option.selected) Color(0xFFD7C9FF) else Color(0xFFE9E7F1)),
-                        colors = CardDefaults.cardColors(containerColor = if (option.selected) Color(0xFFF0EAFE) else Color.White)
+                        border = BorderStroke(1.dp, if (option.selected) MaterialTheme.colorScheme.primary.copy(alpha = .48f) else MaterialTheme.colorScheme.outlineVariant),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (option.selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        )
                     ) {
                         Column(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            Icon(option.icon, null, tint = option.tint, modifier = Modifier.size(23.dp))
+                            Icon(option.icon, null, tint = iconTint, modifier = Modifier.size(23.dp))
                             Spacer(Modifier.height(3.dp))
-                            Text(option.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(option.title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(option.subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
@@ -221,6 +233,23 @@ internal fun QuickAccessSection(
         }
     }
 }
+
+private fun readableDashboardTint(color: Color): Color {
+    val lift = .48f
+    return Color(
+        red = color.red + (1f - color.red) * lift,
+        green = color.green + (1f - color.green) * lift,
+        blue = color.blue + (1f - color.blue) * lift,
+        alpha = color.alpha
+    )
+}
+
+private fun blendDashboardTint(surface: Color, tint: Color, amount: Float): Color = Color(
+    red = surface.red + (tint.red - surface.red) * amount,
+    green = surface.green + (tint.green - surface.green) * amount,
+    blue = surface.blue + (tint.blue - surface.blue) * amount,
+    alpha = 1f
+)
 
 @Composable
 private fun CarouselHeader(
@@ -268,7 +297,7 @@ private fun CarouselDots(itemCount: Int, state: LazyListState, itemWidth: Dp) {
             repeat(pages) { page ->
                 Box(
                     Modifier.padding(horizontal = 3.dp).size(if (page == currentPage) 7.dp else 6.dp)
-                        .background(if (page == currentPage) MaterialTheme.colorScheme.primary else Color(0xFFD6D3E0), CircleShape)
+                        .background(if (page == currentPage) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, CircleShape)
                 )
             }
         }

@@ -67,6 +67,7 @@ import java.util.UUID
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private const val IMAGE_EDITOR_LOG_TAG = "ENotesImageEditor"
@@ -94,6 +95,7 @@ internal fun ImageEditorDialog(
     var selectedTool by remember(uriText) { mutableStateOf("Crop") }
     var markupTool by remember(uriText) { mutableStateOf("Pen") }
     var markupColor by remember(uriText) { mutableIntStateOf(imageMarkupColors.first()) }
+    var highlighterTransparency by remember(uriText) { mutableFloatStateOf(.6f) }
     var showOriginal by remember(uriText) { mutableStateOf(false) }
     var textDialog by remember(uriText) { mutableStateOf(false) }
     var annotationText by remember(uriText) { mutableStateOf("") }
@@ -326,6 +328,7 @@ internal fun ImageEditorDialog(
                                 draft = if (showOriginal) null else draftAnnotation,
                                 activeTool = if (showOriginal || selectedTool != "Markup") "" else markupTool,
                                 activeColor = markupColor,
+                                highlighterOpacity = 1f - highlighterTransparency,
                                 onDraftChange = { draftAnnotation = it },
                                 onDraftFinish = { annotation ->
                                     if (annotation != null) latestHistoryCommit(currentState.copy(annotations = currentState.annotations + annotation))
@@ -434,6 +437,10 @@ internal fun ImageEditorDialog(
                             }
                             Text("${markupTool} color", style = MaterialTheme.typography.labelLarge)
                             MarkupColorPicker(markupColor) { markupColor = it }
+                            if (markupTool == "Highlighter") {
+                                Text("Highlighter transparency · ${(highlighterTransparency * 100).roundToInt()}%", style = MaterialTheme.typography.labelLarge)
+                                Slider(value = highlighterTransparency, onValueChange = { highlighterTransparency = it }, valueRange = .1f..0.9f, steps = 15)
+                            }
                             Text("Draw with the pen, broad highlighter, or arrow. Add text and choose its color here. Markup stays editable until Save.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         else -> {
@@ -553,6 +560,7 @@ private fun ImageMarkupOverlay(
     draft: ImageAnnotation?,
     activeTool: String,
     activeColor: Int,
+    highlighterOpacity: Float,
     onDraftChange: (ImageAnnotation?) -> Unit,
     onDraftFinish: (ImageAnnotation?) -> Unit
 ) {
@@ -561,7 +569,7 @@ private fun ImageMarkupOverlay(
     val latestDraftFinish by rememberUpdatedState(onDraftFinish)
     Canvas(
         Modifier.fillMaxSize().onSizeChanged { canvasSize = it }
-            .pointerInput(activeTool, activeColor, bitmap, canvasSize) {
+            .pointerInput(activeTool, activeColor, highlighterOpacity, bitmap, canvasSize) {
                 if (activeTool != "Pen" && activeTool != "Highlighter" && activeTool != "Arrow") return@pointerInput
                 var points = emptyList<ImagePoint>()
                 var working: ImageAnnotation? = null
@@ -570,7 +578,7 @@ private fun ImageMarkupOverlay(
                         val bounds = bitmap?.let { imageBounds(canvasSize.width.toFloat(), canvasSize.height.toFloat(), it.width, it.height) }
                         val normalized = bounds?.let { normalizePoint(position, it) }
                         points = normalized?.let(::listOf).orEmpty()
-                        working = if (points.isNotEmpty()) createImageAnnotation(activeTool, points, activeColor) else null
+                        working = if (points.isNotEmpty()) createImageAnnotation(activeTool, points, activeColor, highlighterOpacity = highlighterOpacity) else null
                         latestDraftChange(working)
                     },
                     onDrag = { change: PointerInputChange, _ ->
@@ -579,7 +587,7 @@ private fun ImageMarkupOverlay(
                         val normalized = bounds?.let { normalizePoint(change.position, it) }
                         if (normalized != null && points.isNotEmpty()) {
                             points = if (activeTool == "Arrow") listOf(points.first(), normalized) else points + normalized
-                            working = createImageAnnotation(activeTool, points, activeColor)
+                            working = createImageAnnotation(activeTool, points, activeColor, highlighterOpacity = highlighterOpacity)
                             latestDraftChange(working)
                         }
                     },
