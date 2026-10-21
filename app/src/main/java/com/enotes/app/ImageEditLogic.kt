@@ -19,7 +19,8 @@ internal fun viewerPanBounds(viewport: PanSize, image: PanSize, scale: Float): P
 
 internal fun clampViewerPan(offset: PanOffset, viewport: PanSize, image: PanSize, scale: Float): PanOffset {
     val bounds = viewerPanBounds(viewport, image, scale.coerceAtLeast(1f))
-    return PanOffset(offset.x.coerceIn(-bounds.x, bounds.x), offset.y.coerceIn(-bounds.y, bounds.y))
+    fun clamp(value: Float, bound: Float) = if (bound <= 0f) 0f else value.coerceIn(-bound, bound)
+    return PanOffset(clamp(offset.x, bounds.x), clamp(offset.y, bounds.y))
 }
 
 internal data class PixelRect(val left: Int, val top: Int, val right: Int, val bottom: Int) {
