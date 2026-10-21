@@ -1,6 +1,32 @@
 package com.enotes.app
 
 import kotlin.math.max
+import kotlin.math.roundToInt
+
+internal data class ImageDimensions(val width: Int, val height: Int)
+
+/** Returns dimensions that fit inside [maxDimension] without changing the image's aspect ratio. */
+internal fun fitImageWithinMaxDimension(width: Int, height: Int, maxDimension: Int): ImageDimensions? {
+    if (width <= 0 || height <= 0 || maxDimension <= 0) return null
+    val scale = minOf(1.0, maxDimension.toDouble() / maxOf(width, height))
+    return ImageDimensions(
+        (width * scale).roundToInt().coerceIn(1, maxDimension),
+        (height * scale).roundToInt().coerceIn(1, maxDimension)
+    )
+}
+
+/** BitmapFactory requires a power-of-two sample size on the Android versions supported here. */
+internal fun imageDecodeSampleSize(width: Int, height: Int, maxDimension: Int): Int {
+    if (width <= 0 || height <= 0 || maxDimension <= 0) return 1
+    var sample = 1
+    while (width.toLong() / sample > maxDimension || height.toLong() / sample > maxDimension) {
+        if (sample > Int.MAX_VALUE / 2) break
+        sample *= 2
+    }
+    return sample
+}
+
+internal fun needsImagePreviewRender(state: ImageEditState): Boolean = state != ImageEditState()
 
 internal data class PanSize(val width: Float, val height: Float)
 internal data class PanOffset(val x: Float, val y: Float)
@@ -96,3 +122,4 @@ internal fun redoImageEdit(history: ImageEditHistory): ImageEditHistory {
     val next = history.redo.lastOrNull() ?: return history
     return history.copy(current = next, undo = (history.undo + history.current).takeLast(60), redo = history.redo.dropLast(1))
 }
+

@@ -13,6 +13,7 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -54,15 +55,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.FileNotFoundException
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import java.util.UUID
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
+
+private const val IMAGE_EDITOR_LOG_TAG = "ENotesImageEditor"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -87,6 +93,8 @@ internal fun ImageEditorDialog(
     var annotationText by remember(uriText) { mutableStateOf("") }
     var draftAnnotation by remember(uriText) { mutableStateOf<ImageAnnotation?>(null) }
     var pendingSave by remember(uriText) { mutableStateOf(false) }
+    var previewMaxDimension by remember(uriText) { mutableIntStateOf(2048) }
+    var previewRetryToken by remember(uriText) { mutableIntStateOf(0) }
     val historyState = remember(uriText) { mutableStateOf(ImageEditHistory()) }
     var history by historyState
     val currentState = history.current
@@ -95,23 +103,97 @@ internal fun ImageEditorDialog(
         if (granted) pendingSave = true else saveError = "Storage permission is needed to save an edited image on this Android version."
     }
 
-    val sourceLoad by produceState<ImageLoadResult>(initialValue = ImageLoadResult(null, null), key1 = uriText, key2 = initialPreview) {
-        val result = withContext(Dispatchers.IO) {
-            runCatching {
-                val previewCopy = initialPreview?.let { runCatching { it.asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() }
-                previewCopy ?: decodeBitmap(context, Uri.parse(uriText), 1800)
-            }.fold({ ImageLoadResult(it, null) }, { ImageLoadResult(null, it.message ?: "The image provider could not open this file.") })
+    val sourceLoad by produceState(
+        initialValue = ImageLoadResult(null, null, false),
+        key1 = uriText,
+        key2 = initialPreview,
+        key3 = previewMaxDimension,
+        key4 = previewRetryToken,
+        key5 = mimeType
+    ) {
+        value = ImageLoadResult(null, null, false)
+        var pendingResult: ImageLoadResult? = null
+        try {
+            val result = withContext(Dispatchers.IO) {
+                val uri = Uri.parse(uriText)
+                val resolvedMime = runCatching { context.contentResolver.getType(uri) }.getOrNull() ?: mimeType.ifBlank { "unknown" }
+                try {
+                    val cached = if (previewRetryToken == 0) {
+                        try { initialPreview?.asAndroidBitmap() } catch (_: Exception) { null }
+                    } else null
+                    val reusable = cached?.takeIf {
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                            !it.isRecycled && it.config != Bitmap.Config.HARDWARE &&
+                            it.width <= previewMaxDimension && it.height <= previewMaxDimension
+                    }
+                    val loaded = if (reusable != null) {
+                        ImageLoadResult(reusable, null, false)
+                    } else {
+                        ImageLoadResult(decodeBitmap(context, uri, previewMaxDimension), null, true)
+                    }
+                    Log.d(IMAGE_EDITOR_LOG_TAG, "Image preview source ready stage=decode width=${loaded.bitmap?.width} height=${loaded.bitmap?.height} mime=$resolvedMime")
+                    loaded
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: OutOfMemoryError) {
+                    logImageFailure("preview-decode", resolvedMime, error, uri = uri, maxDimension = previewMaxDimension)
+                    ImageLoadResult(null, "There was not enough memory to prepare this image. Retry with a smaller preview.", false)
+                } catch (error: Exception) {
+                    logImageFailure("preview-decode", resolvedMime, error, uri = uri, maxDimension = previewMaxDimension)
+                    ImageLoadResult(null, imageLoadErrorMessage(error), false)
+                }.also { pendingResult = it }
+            }
+            value = result
+            pendingResult = null
+        } finally {
+            pendingResult?.takeIf { it.owned }?.bitmap?.let { if (!it.isRecycled) it.recycle() }
         }
-        value = result
     }
     val source = sourceLoad.bitmap
-    DisposableEffect(source) {
-        onDispose { source?.let { if (!it.isRecycled) it.recycle() } }
+    DisposableEffect(source, sourceLoad.owned) {
+        val owned = sourceLoad.owned
+        onDispose { if (owned) source?.let { if (!it.isRecycled) it.recycle() } }
     }
-    val preview by produceState<Bitmap?>(initialValue = null, key1 = source, key2 = currentState) {
-        value = source?.let { bitmap -> withContext(Dispatchers.Default) { runCatching { renderEditedBitmap(bitmap, currentState) }.getOrNull() } }
+    val previewResult by produceState<ImagePreviewResult>(initialValue = ImagePreviewResult(null, null, true), key1 = source, key2 = currentState) {
+        value = ImagePreviewResult(null, null, true)
+        val bitmap = source
+        if (bitmap == null) {
+            value = ImagePreviewResult(null, null, false)
+        } else if (bitmap.isRecycled) {
+            value = ImagePreviewResult(null, "The preview image was released. Retry to load it again.", false)
+        } else if (!needsImagePreviewRender(currentState)) {
+            // Opening the editor with no changes should display the decoded source directly.
+            // Rendering an identical second bitmap here doubled the editor's initial bitmap memory.
+            value = ImagePreviewResult(bitmap, null, false)
+        } else {
+            var pendingBitmap: Bitmap? = null
+            try {
+                val result = withContext(Dispatchers.Default) {
+                    try {
+                        pendingBitmap = renderEditedBitmap(bitmap, currentState)
+                        ImagePreviewResult(pendingBitmap, null, false)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: OutOfMemoryError) {
+                        logImageFailure("preview-render", mimeType, error, width = bitmap.width, height = bitmap.height, uri = Uri.parse(uriText))
+                        ImagePreviewResult(null, "There was not enough memory to render this edit. Retry with a smaller preview.", false)
+                    } catch (error: Exception) {
+                        logImageFailure("preview-render", mimeType, error, width = bitmap.width, height = bitmap.height, uri = Uri.parse(uriText))
+                        ImagePreviewResult(null, "This edit could not be rendered. Retry the preview or undo the last change.", false)
+                    }
+                }
+                value = result
+                pendingBitmap = null
+            } catch (cancelled: CancellationException) {
+                pendingBitmap?.takeIf { it !== bitmap }?.let { if (!it.isRecycled) it.recycle() }
+                throw cancelled
+            } finally {
+                pendingBitmap?.takeIf { it !== bitmap }?.let { if (!it.isRecycled) it.recycle() }
+            }
+        }
     }
-    DisposableEffect(preview) {
+    val preview = previewResult.bitmap
+    DisposableEffect(preview, source) {
         onDispose { preview?.let { if (it !== source && !it.isRecycled) it.recycle() } }
     }
 
@@ -141,14 +223,27 @@ internal fun ImageEditorDialog(
         busy = true
         saveError = null
         scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val full = runCatching { decodeBitmap(context, Uri.parse(uriText), 4800) }
-                        .getOrElse { original.copy(Bitmap.Config.ARGB_8888, false) ?: throw it }
-                    try {
+            val result: Result<Uri> = withContext(Dispatchers.IO) {
+                try {
+                    val full = try {
+                        decodeBitmap(context, Uri.parse(uriText), 4800)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        original.copy(Bitmap.Config.ARGB_8888, false) ?: throw error
+                    }
+                    Result.success(try {
                         val output = renderEditedBitmap(full, exportState)
                         try { saveToGallery(context, output, saveAsPng) } finally { if (output !== full) output.recycle() }
-                    } finally { if (full !== original && !full.isRecycled) full.recycle() }
+                    } finally { if (full !== original && !full.isRecycled) full.recycle() })
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: OutOfMemoryError) {
+                    logImageFailure("export-render", mimeType, error, width = original.width, height = original.height, uri = Uri.parse(uriText))
+                    Result.failure(IOException("The edited image needs more memory to export. Try a smaller image or close other apps and retry.", error))
+                } catch (error: Exception) {
+                    logImageFailure("export-save", mimeType, error, width = original.width, height = original.height, uri = Uri.parse(uriText))
+                    Result.failure(error)
                 }
             }
             busy = false
@@ -246,9 +341,23 @@ internal fun ImageEditorDialog(
                             Icon(Icons.Default.BrokenImage, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(34.dp))
                             Text("This image could not be opened for editing.", color = MaterialTheme.colorScheme.onBackground, style = MaterialTheme.typography.titleMedium)
                             Text(sourceLoad.error.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                            OutlinedButton(onClick = {
+                                if (previewMaxDimension > 1024) previewMaxDimension = 1024 else previewRetryToken++
+                            }) { Text(if (previewMaxDimension > 1024) "Retry at lower resolution" else "Retry") }
+                        }
+                    } else if (previewResult.loading) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircularProgressIndicator()
+                            Text("Rendering preview…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } else if (preview == null) {
-                        Text("A preview could not be rendered. Try a smaller image.", color = MaterialTheme.colorScheme.onBackground)
+                        Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.BrokenImage, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(34.dp))
+                            Text(previewResult.error ?: "The image preview is unavailable.", color = MaterialTheme.colorScheme.onBackground)
+                            OutlinedButton(onClick = {
+                                if (previewMaxDimension > 1024) previewMaxDimension = 1024 else previewRetryToken++
+                            }) { Text(if (previewMaxDimension > 1024) "Retry at lower resolution" else "Retry") }
+                        }
                     }
                 }
 
@@ -489,32 +598,106 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMarkup(annotati
     }
 }
 
-private data class ImageLoadResult(val bitmap: Bitmap?, val error: String?)
+private data class ImageLoadResult(val bitmap: Bitmap?, val error: String?, val owned: Boolean)
+private data class ImagePreviewResult(val bitmap: Bitmap?, val error: String?, val loading: Boolean)
 
-private fun decodeBitmap(context: Context, uri: Uri, maxDimension: Int): Bitmap {
+private fun imageLoadErrorMessage(error: Exception): String = when (error) {
+    is SecurityException -> "Access to this image has expired. Select the image again and retry."
+    is FileNotFoundException -> "This image is no longer available. Select it again and retry."
+    is IOException -> error.message?.takeIf { it.startsWith("This image") || it == "The source image is unavailable." }
+        ?: "This image is damaged or could not be read."
+    is IllegalArgumentException -> "This image format is not supported or the file is damaged."
+    else -> "This image could not be decoded by this device."
+}
+
+internal fun logImageFailure(
+    stage: String,
+    mime: String,
+    error: Throwable,
+    width: Int? = null,
+    height: Int? = null,
+    uri: Uri? = null,
+    maxDimension: Int? = null
+) {
+    val rawDetails = error.message.orEmpty()
+    val uriText = uri?.toString()?.takeIf { it.isNotEmpty() }
+    val details = (if (uriText == null) rawDetails else rawDetails.replace(uriText, "<content-uri>")).take(240)
+    Log.e(
+        IMAGE_EDITOR_LOG_TAG,
+        "Image operation failed stage=$stage width=${width ?: "unknown"} height=${height ?: "unknown"} " +
+            "maxDimension=${maxDimension ?: "n/a"} mime=$mime error=${error.javaClass.simpleName} details=$details"
+    )
+}
+
+internal fun decodeBitmap(context: Context, uri: Uri, maxDimension: Int): Bitmap {
+    val mime = runCatching { context.contentResolver.getType(uri) }.getOrNull() ?: "unknown"
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
         val source = ImageDecoder.createSource(context.contentResolver, uri)
         return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            val width = info.size.width.coerceAtLeast(1)
-            val height = info.size.height.coerceAtLeast(1)
-            val scale = min(1f, maxDimension.toFloat() / maxOf(width, height))
-            decoder.setTargetSize((width * scale).toInt().coerceAtLeast(1), (height * scale).toInt().coerceAtLeast(1))
+            val originalWidth = info.size.width
+            val originalHeight = info.size.height
+            Log.d(IMAGE_EDITOR_LOG_TAG, "Image dimensions stage=decoder-bounds width=$originalWidth height=$originalHeight maxDimension=$maxDimension mime=$mime")
+            val target = fitImageWithinMaxDimension(originalWidth, originalHeight, maxDimension)
+                ?: throw IOException("This image has invalid dimensions.")
+            decoder.setTargetSize(target.width, target.height)
         }
     }
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        ?: throw IOException("The source image is unavailable.")
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException("This image format could not be decoded.")
-    var sample = 1
-    while (bounds.outWidth / sample > maxDimension || bounds.outHeight / sample > maxDimension) sample *= 2
+    val boundsStream = context.contentResolver.openInputStream(uri) ?: throw FileNotFoundException("The source image is unavailable.")
+    boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException("This image is damaged or its format is not supported on this Android version.")
+    Log.d(IMAGE_EDITOR_LOG_TAG, "Image dimensions stage=decoder-bounds width=${bounds.outWidth} height=${bounds.outHeight} maxDimension=$maxDimension mime=$mime")
+    val sample = imageDecodeSampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
     val decoded = context.contentResolver.openInputStream(uri)?.use {
-        BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample; inPreferredConfig = Bitmap.Config.ARGB_8888 })
+        BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+            inScaled = false
+        })
+    } ?: throw FileNotFoundException("The source image is unavailable.")
+    if (decoded.width <= 0 || decoded.height <= 0 || decoded.isRecycled) {
+        if (!decoded.isRecycled) decoded.recycle()
+        throw IOException("This image is damaged or its format is not supported on this Android version.")
     }
-    return decoded ?: throw IOException("The image could not be loaded.")
+    val orientation = try {
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            ExifInterface(input).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } ?: ExifInterface.ORIENTATION_NORMAL
+    } catch (error: Exception) {
+        logImageFailure("exif-orientation", mime, error, width = bounds.outWidth, height = bounds.outHeight, uri = uri)
+        ExifInterface.ORIENTATION_NORMAL
+    }
+    return applyExifOrientation(decoded, orientation)
+}
+
+private fun applyExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+    val transform = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> transform.setScale(-1f, 1f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> transform.setRotate(180f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> transform.setScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> { transform.setRotate(90f); transform.postScale(-1f, 1f) }
+        ExifInterface.ORIENTATION_ROTATE_90 -> transform.setRotate(90f)
+        ExifInterface.ORIENTATION_TRANSVERSE -> { transform.setRotate(270f); transform.postScale(-1f, 1f) }
+        ExifInterface.ORIENTATION_ROTATE_270 -> transform.setRotate(270f)
+        else -> return bitmap
+    }
+    return try {
+        Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, transform, true).also { oriented ->
+            if (oriented !== bitmap && !bitmap.isRecycled) bitmap.recycle()
+        }
+    } catch (error: Exception) {
+        if (!bitmap.isRecycled) bitmap.recycle()
+        throw error
+    } catch (error: OutOfMemoryError) {
+        if (!bitmap.isRecycled) bitmap.recycle()
+        throw error
+    }
 }
 
 private fun renderEditedBitmap(source: Bitmap, state: ImageEditState): Bitmap {
+    if (source.isRecycled || source.width <= 0 || source.height <= 0) throw IOException("The image preview is no longer available.")
     val transform = Matrix().apply {
         if (state.rotation % 360 != 0) postRotate(state.rotation.toFloat())
         if (state.flipHorizontal || state.flipVertical) postScale(if (state.flipHorizontal) -1f else 1f, if (state.flipVertical) -1f else 1f)
@@ -522,20 +705,29 @@ private fun renderEditedBitmap(source: Bitmap, state: ImageEditState): Bitmap {
     var transformed = if (state.rotation % 360 != 0 || state.flipHorizontal || state.flipVertical) {
         Bitmap.createBitmap(source, 0, 0, source.width, source.height, transform, true)
     } else source
-    val crop = cropBounds(transformed.width, transformed.height, cropAspect(state.crop))
-    if (crop.left != 0 || crop.top != 0 || crop.right != transformed.width || crop.bottom != transformed.height) {
-        val cropped = Bitmap.createBitmap(transformed, crop.left, crop.top, crop.width, crop.height)
-        if (transformed !== source && transformed !== cropped && !transformed.isRecycled) transformed.recycle()
-        transformed = cropped
+    try {
+        val crop = cropBounds(transformed.width, transformed.height, cropAspect(state.crop))
+        if (crop.left != 0 || crop.top != 0 || crop.right != transformed.width || crop.bottom != transformed.height) {
+            val cropped = Bitmap.createBitmap(transformed, crop.left, crop.top, crop.width, crop.height)
+            if (transformed !== source && transformed !== cropped && !transformed.isRecycled) transformed.recycle()
+            transformed = cropped
+        }
+        val output = Bitmap.createBitmap(transformed.width, transformed.height, Bitmap.Config.ARGB_8888)
+        var keepOutput = false
+        try {
+            val canvas = android.graphics.Canvas(output)
+            val matrix = adjustedColorMatrix(state)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { colorFilter = ColorMatrixColorFilter(matrix) }
+            canvas.drawBitmap(transformed, 0f, 0f, paint)
+            renderAnnotations(canvas, output.width, output.height, state.annotations)
+            keepOutput = true
+            return output
+        } finally {
+            if (!keepOutput && !output.isRecycled) output.recycle()
+        }
+    } finally {
+        if (transformed !== source && !transformed.isRecycled) transformed.recycle()
     }
-    val output = Bitmap.createBitmap(transformed.width, transformed.height, Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(output)
-    val matrix = adjustedColorMatrix(state)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { colorFilter = ColorMatrixColorFilter(matrix) }
-    canvas.drawBitmap(transformed, 0f, 0f, paint)
-    if (transformed !== source && !transformed.isRecycled) transformed.recycle()
-    renderAnnotations(canvas, output.width, output.height, state.annotations)
-    return output
 }
 
 private fun adjustedColorMatrix(state: ImageEditState): ColorMatrix {
@@ -620,3 +812,4 @@ private fun saveToGallery(context: Context, bitmap: Bitmap, png: Boolean): Uri {
         throw error
     }
 }
+

@@ -1,6 +1,8 @@
 package com.enotes.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DashboardAndEditorTest {
@@ -127,6 +129,29 @@ class DashboardAndEditorTest {
     }
 
     @Test
+    fun imagePreviewSizingPreservesAspectAndBoundsLargeSources() {
+        assertEquals(ImageDimensions(2048, 1365), fitImageWithinMaxDimension(12000, 8000, 2048))
+        assertEquals(ImageDimensions(2048, 9), fitImageWithinMaxDimension(20000, 90, 2048))
+        assertEquals(ImageDimensions(640, 480), fitImageWithinMaxDimension(640, 480, 2048))
+        assertNull(fitImageWithinMaxDimension(0, 10, 2048))
+    }
+
+    @Test
+    fun legacyImageDecoderSamplingHandlesLargeAndExtremeDimensions() {
+        assertEquals(8, imageDecodeSampleSize(12000, 8000, 2048))
+        assertEquals(16, imageDecodeSampleSize(20000, 90, 2048))
+        assertEquals(1, imageDecodeSampleSize(640, 480, 2048))
+        assertTrue(imageDecodeSampleSize(Int.MAX_VALUE, Int.MAX_VALUE, 2048) > 0)
+    }
+
+    @Test
+    fun untouchedPhotoUsesItsDecodedSourceAsPreviewWithoutAllocatingAnotherBitmap() {
+        assertEquals(false, needsImagePreviewRender(ImageEditState()))
+        assertEquals(true, needsImagePreviewRender(ImageEditState().copy(rotation = 90)))
+        assertEquals(true, needsImagePreviewRender(ImageEditState().copy(brightness = 1f)))
+    }
+
+    @Test
     fun imageEditHistoryUndoesAndRedoesWholeSettings() {
         val initial = ImageEditHistory()
         val adjusted = recordImageEdit(initial, initial.current.copy(brightness = 18f))
@@ -138,4 +163,5 @@ class DashboardAndEditorTest {
         assertEquals(initial, recordImageEdit(initial, initial.current))
     }
 }
+
 

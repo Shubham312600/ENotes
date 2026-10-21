@@ -3,6 +3,7 @@ package com.enotes.app
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
@@ -67,6 +68,7 @@ import androidx.compose.ui.layout.ContentScale
 import com.enotes.app.data.Note
 import com.enotes.app.data.NoteFolder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.text.DateFormat
@@ -1002,17 +1004,29 @@ private fun EmbeddedImage(uriText: String, onOpen: () -> Unit, onImageLoaded: (I
 @Composable
 private fun produceImage(uriText: String, context: Context, maxDimension: Int = 1800): State<ImageBitmap?> {
     return produceState<ImageBitmap?>(initialValue = null, key1 = uriText, key2 = maxDimension) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                val uri = Uri.parse(uriText)
-                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
-                var sample = 1
-                while (bounds.outWidth / sample > maxDimension || bounds.outHeight / sample > maxDimension) sample *= 2
-                val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample.coerceAtLeast(1) }
-                val bitmap = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, options) }
-                bitmap?.asImageBitmap()
-            }.getOrNull()
+        var pendingBitmap: Bitmap? = null
+        try {
+            val image = withContext(Dispatchers.IO) {
+                val decoded = decodeBitmap(context, Uri.parse(uriText), maxDimension)
+                pendingBitmap = decoded
+                decoded.asImageBitmap()
+            }
+            value = image
+            pendingBitmap = null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: OutOfMemoryError) {
+            val uri = Uri.parse(uriText)
+            val mime = try { context.contentResolver.getType(uri) } catch (_: Exception) { null } ?: "unknown"
+            logImageFailure("embedded-preview", mime, error, uri = uri, maxDimension = maxDimension)
+            value = null
+        } catch (error: Exception) {
+            val uri = Uri.parse(uriText)
+            val mime = try { context.contentResolver.getType(uri) } catch (_: Exception) { null } ?: "unknown"
+            logImageFailure("embedded-preview", mime, error, uri = uri, maxDimension = maxDimension)
+            value = null
+        } finally {
+            pendingBitmap?.let { if (!it.isRecycled) it.recycle() }
         }
     }
 }
@@ -1241,4 +1255,5 @@ private fun parsePastedTable(text: String): List<List<String>> {
     val width = rows.maxOfOrNull { it.size }?.coerceAtMost(12) ?: 1
     return rows.take(100).map { row -> row.take(12) + List((width - row.size).coerceAtLeast(0)) { "" } }
 }
+
 
