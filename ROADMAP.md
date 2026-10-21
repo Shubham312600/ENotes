@@ -177,9 +177,11 @@ The repository has a buildable **prototype**, not the complete product. The phot
 
 
 
-## Text formatting and photo markup follow-up (2026-10-21; verification pending)
-- [ ] Keep the selected note-text range available while the formatting dialog is open; apply and clear styles against that range, and continue numbered lists when Enter creates a new line.
-- [ ] Apply alignment and line spacing to the note text, show the active alignment and current spacing, and retain list/style range offsets when list markers are changed.
-- [ ] Add a color palette for pen, translucent highlighter, arrows, and text annotations; render these colors in both the editor preview and saved image.
-- [ ] Unit coverage was added for formatting ranges, numbered-list continuation, and colored markup; the test suite and APK build still need to run.
-- [ ] Verify the editor interactions and saved image on a device or emulator; no runtime verification is available in this workspace.
+## Text formatting and photo markup follow-up (2026-10-21; CI passed, device verification pending)
+- [x] Preserved the selected note-text range while formatting is open, applied and cleared styles to that range, and made font size, style, color, highlight, and formatting selection updates persist.
+- [x] Made alignment controls reflect and apply the active note-text alignment; line spacing now displays its current multiplier and saves with the note.
+- [x] Numbered lists replace existing bullets/numbers, continue numbering from the prior line, and add the next number when Enter creates a list row while keeping style offsets aligned.
+- [x] Added a selectable color palette for pen, translucent highlighter, arrows, and text annotations; colors are used in both editor preview and saved-image rendering.
+- [x] GitHub Actions run #51 passed unit tests, Android debug APK build, and artifact upload for commit `c3d2007`; artifact size 16,630,303 bytes, expires 2026-11-04.
+- [x] `git diff --check` passed; this workstation has no local JDK, Gradle, or Android SDK.
+- [ ] Verify formatting and markup gestures, saved image appearance, and undo/redo on a device or emulator; runtime behavior has not been checked here.
