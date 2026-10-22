@@ -7,12 +7,26 @@ class NotesRepository(private val dao: NoteDao) {
     fun observeNotes(): Flow<List<Note>> = dao.observeActiveNotes()
     fun observeArchived(): Flow<List<Note>> = dao.observeArchivedNotes()
     fun observeTrash(): Flow<List<Note>> = dao.observeTrashedNotes()
+    fun observeFolders(): Flow<List<NoteFolder>> = dao.observeFolders()
+    suspend fun createFolder(name: String) { dao.createFolder(NoteFolder(name.trim(), System.currentTimeMillis())) }
 
     suspend fun importNotes(notes: List<Note>) {
         dao.upsertAll(notes)
     }
 
-    suspend fun save(title: String, body: String, existing: Note? = null) {
+    suspend fun save(
+        title: String,
+        body: String,
+        existing: Note? = null,
+        category: String = existing?.category ?: "Others",
+        folder: String? = existing?.folder,
+        attachmentUri: String? = existing?.attachmentUri,
+        priority: String = existing?.priority ?: "Medium",
+        reminderAt: Long? = existing?.reminderAt,
+        labelColor: String = existing?.labelColor ?: "purple",
+        isPinned: Boolean = existing?.isPinned ?: false,
+        richContentJson: String = existing?.richContentJson ?: "[]"
+    ) {
         val now = System.currentTimeMillis()
         dao.upsert(
             Note(
@@ -21,9 +35,16 @@ class NotesRepository(private val dao: NoteDao) {
                 body = body,
                 createdAt = existing?.createdAt ?: now,
                 updatedAt = now,
-                isPinned = existing?.isPinned ?: false,
+                isPinned = isPinned,
                 isArchived = existing?.isArchived ?: false,
-                deletedAt = null
+                deletedAt = null,
+                category = category,
+                folder = folder,
+                attachmentUri = attachmentUri,
+                priority = priority,
+                reminderAt = reminderAt,
+                labelColor = labelColor,
+                richContentJson = richContentJson
             )
         )
     }
