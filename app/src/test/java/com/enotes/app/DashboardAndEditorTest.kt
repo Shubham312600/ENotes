@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 
 class DashboardAndEditorTest {
     @Test
@@ -78,6 +80,43 @@ class DashboardAndEditorTest {
             emptyList<NoteTextStyleRange>(),
             remapNoteTextStylesForTextEdit("bold word here", " here", listOf(NoteTextStyleRange(0, 9, bold = true)))
         )
+    }
+
+    @Test
+    fun formattedDeletionKeepsTheImeCompositionAndDeletesOnlyTheRequestedCharacter() {
+        val boldHello = listOf(NoteTextStyleRange(0, 5, bold = true))
+        val formatted = restyleNoteBodyValue(TextFieldValue("Hello world", TextRange(11)), boldHello)
+        val afterOneBackspace = TextFieldValue("Hello worl", TextRange(10), TextRange(6, 10))
+        val restyled = restyleNoteBodyValue(afterOneBackspace, boldHello)
+
+        assertEquals("Hello world", formatted.text)
+        assertEquals("Hello worl", restyled.text)
+        assertEquals(TextRange(10), restyled.selection)
+        assertEquals(TextRange(6, 10), restyled.composition)
+        assertTrue(restyled.annotatedString.spanStyles.any { it.start == 0 && it.end == 5 })
+
+        val underlineTheRest = applyNoteTextStyle(restyled.text.length, boldHello, 6, 10) { it.copy(underline = true) }
+        val afterSecondBackspace = TextFieldValue("Hello wor", TextRange(9), TextRange(6, 9))
+        val remappedStyles = remapNoteTextStylesForTextEdit(restyled.text, afterSecondBackspace.text, underlineTheRest)
+        val restyledAgain = restyleNoteBodyValue(afterSecondBackspace, remappedStyles)
+
+        assertEquals("Hello wor", restyledAgain.text)
+        assertEquals(TextRange(9), restyledAgain.selection)
+        assertEquals(TextRange(6, 9), restyledAgain.composition)
+        assertTrue(restyledAgain.annotatedString.spanStyles.any { it.start == 0 && it.end == 5 && it.item.fontWeight == androidx.compose.ui.text.font.FontWeight.Bold })
+        assertTrue(restyledAgain.annotatedString.spanStyles.any { it.start == 6 && it.end == 9 && it.item.textDecoration?.contains(androidx.compose.ui.text.style.TextDecoration.Underline) == true })
+        val restoredStyles = decodeRichContent(
+            encodeRichContent(listOf(RichContentBlock(kind = "body-formatting", textStyles = remappedStyles)))
+        ).single().textStyles
+        assertEquals(remappedStyles, restoredStyles)
+    }
+
+    @Test
+    fun attachmentMimeTypeUsesProviderTypeAndFallsBackToKnownExtensions() {
+        assertEquals("application/pdf", attachmentMimeType("content://docs/report.pdf", "application/pdf"))
+        assertEquals("image/jpeg", attachmentMimeType("content://docs/photo.jpg", "application/octet-stream"))
+        assertEquals("audio/mp4", attachmentMimeType("content://docs/voice.m4a", null))
+        assertEquals("application/octet-stream", attachmentMimeType("content://docs/archive.unknown", null))
     }
 
     @Test

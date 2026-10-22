@@ -258,11 +258,10 @@ internal fun NoteEditorScreen(
         if (next.text != body.text) formattingSelection = TextRange.Zero
         if (next.selection.min < next.selection.max) formattingSelection = next.selection
         bodyStyles = styleRanges ?: remapNoteTextStylesForTextEdit(body.text, next.text, bodyStyles)
-        // A stale IME composing range can reinsert characters that were just backspaced
-        // after styled spans are rebuilt. Deletions end that composition and let the IME
-        // start a fresh one on the next typed character.
-        val composition = if (next.text.length < body.text.length) null else next.composition
-        body = TextFieldValue(styledNoteBody(next.text, bodyStyles), next.selection, composition)
+        // Keep the IME's selection and composing range from BasicTextField's latest value.
+        // Clearing composition during deletion interrupts the active input connection and
+        // can make the IME restore composing text after a formatted edit.
+        body = restyleNoteBodyValue(next, bodyStyles)
         syncBodyFormatBlock()
     }
 
@@ -715,6 +714,9 @@ private fun TextFormattingDialog(
         onSelect = { onHighlight(it) }
     )
 }
+
+internal fun restyleNoteBodyValue(value: TextFieldValue, ranges: List<NoteTextStyleRange>): TextFieldValue =
+    value.copy(annotatedString = styledNoteBody(value.text, ranges))
 
 private fun styledNoteBody(text: String, ranges: List<NoteTextStyleRange>) = buildAnnotatedString {
     append(text)

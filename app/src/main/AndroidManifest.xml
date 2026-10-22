@@ -1,5 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+ <queries>
+  <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="application/pdf"/></intent>
+  <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="image/*"/></intent>
+  <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="audio/*"/></intent>
+  <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="video/*"/></intent>
+  <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="application/octet-stream"/></intent>
+ </queries>
  <application android:allowBackup="true" android:label="ENotes" android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
   <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
  </application>

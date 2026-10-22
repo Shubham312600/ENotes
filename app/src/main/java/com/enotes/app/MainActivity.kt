@@ -262,8 +262,7 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
                     })
                 },
                 onOpenAttachment = { uriText ->
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW).apply { data = android.net.Uri.parse(uriText); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }) }
-                        .onFailure { quickMessage = "No app could open this attachment." }
+                    quickMessage = openAttachment(context, uriText)
                 },
                 onSave = { draft ->
                     vm.save(draft.title, draft.body, editing, draft.category, draft.folder, draft.attachmentUri, draft.priority, draft.reminderAt, draft.labelColor, draft.pinned, draft.richContentJson)
@@ -351,12 +350,7 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
                 },
                 onOpenAttachment = { note ->
                     note.attachmentUri?.let { uriText ->
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW).apply {
-                                data = android.net.Uri.parse(uriText)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            })
-                        }.onFailure { quickMessage = "No app could open this attachment." }
+                        quickMessage = openAttachment(context, uriText)
                     }
                 },
                 onPin = vm::pin,
@@ -393,12 +387,7 @@ private fun NotesHome(vm: NotesViewModel, themeMode: String, onThemeModeChange: 
                 },
                 onOpenAttachment = { note ->
                     note.attachmentUri?.let { uriText ->
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW).apply {
-                                data = android.net.Uri.parse(uriText)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            })
-                        }.onFailure { quickMessage = "No app could open this attachment." }
+                        quickMessage = openAttachment(context, uriText)
                     }
                 },
                 onArchive = vm::archive,
