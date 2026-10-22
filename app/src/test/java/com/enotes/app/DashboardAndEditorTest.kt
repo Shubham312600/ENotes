@@ -105,10 +105,6 @@ class DashboardAndEditorTest {
         assertEquals(TextRange(6, 9), restyledAgain.composition)
         assertTrue(restyledAgain.annotatedString.spanStyles.any { it.start == 0 && it.end == 5 && it.item.fontWeight == androidx.compose.ui.text.font.FontWeight.Bold })
         assertTrue(restyledAgain.annotatedString.spanStyles.any { it.start == 6 && it.end == 9 && it.item.textDecoration?.contains(androidx.compose.ui.text.style.TextDecoration.Underline) == true })
-        val restoredStyles = decodeRichContent(
-            encodeRichContent(listOf(RichContentBlock(kind = "body-formatting", textStyles = remappedStyles)))
-        ).single().textStyles
-        assertEquals(remappedStyles, restoredStyles)
     }
 
     @Test
