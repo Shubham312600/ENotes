@@ -68,6 +68,19 @@ class DashboardAndEditorTest {
     }
 
     @Test
+    fun deletingCharactersAndWholeFormattedWordsRemapsOnlyRemainingText() {
+        val style = NoteTextStyleRange(0, 9, bold = true, textColor = 0xFF1976D2.toInt())
+        assertEquals(
+            listOf(style.copy(end = 8)),
+            remapNoteTextStylesForTextEdit("formatted", "formtted", listOf(style))
+        )
+        assertEquals(
+            emptyList<NoteTextStyleRange>(),
+            remapNoteTextStylesForTextEdit("bold word here", " here", listOf(NoteTextStyleRange(0, 9, bold = true)))
+        )
+    }
+
+    @Test
     fun numberedListPrefixesEachSelectedLineAndMovesExistingStyleRanges() {
         val edit = insertChecklistPrefix(
             text = "one\ntwo\nthree",
@@ -185,6 +198,32 @@ class DashboardAndEditorTest {
         assertEquals(900, portrait.height)
         assertEquals(547, portrait.left)
         assertEquals(9f / 16f, portrait.width.toFloat() / portrait.height, .002f)
+    }
+
+    @Test
+    fun freeCropEdgesStayInsideImageAndMapToSourcePixels() {
+        val initial = NormalizedCropRect(.1f, .2f, .9f, .8f)
+        assertEquals(
+            NormalizedCropRect(.3f, .2f, .9f, .8f),
+            moveFreeCropEdges(initial, setOf(CropEdge.Left), .2f, 0f)
+        )
+        assertEquals(
+            NormalizedCropRect(0f, 0f, .9f, .8f),
+            moveFreeCropEdges(initial, setOf(CropEdge.Left, CropEdge.Top), -1f, -1f)
+        )
+        assertEquals(PixelRect(10, 20, 60, 60), normalizedCropBounds(100, 80, NormalizedCropRect(.1f, .25f, .6f, .75f)))
+    }
+
+    @Test
+    fun sheetCsvRoundTripsCommasQuotesAndLineBreaks() {
+        val rows = listOf(
+            listOf("Name", "Notes"),
+            listOf("A, B", "She said \"hello\""),
+            listOf("multi\nline", "plain"),
+            listOf("", "")
+        )
+        assertEquals(rows, parseSheetCsv(encodeSheetCsv(rows)))
+        assertEquals("Plan _ Q4.csv", sheetCsvFilename("Plan / Q4"))
     }
 
     @Test

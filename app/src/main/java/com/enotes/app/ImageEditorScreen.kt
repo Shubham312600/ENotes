@@ -162,14 +162,17 @@ internal fun ImageEditorDialog(
         val owned = sourceLoad.owned
         onDispose { if (owned) source?.let { if (!it.isRecycled) it.recycle() } }
     }
-    val previewResult by produceState<ImagePreviewResult>(initialValue = ImagePreviewResult(null, null, true), key1 = source, key2 = currentState) {
+    // In free-crop mode keep the full transformed image under the crop frame. The crop is
+    // applied when the user leaves this tool or saves, so the handles remain anchored.
+    val previewState = if (selectedTool == "Crop" && currentState.crop == "Free") currentState.copy(freeCrop = null) else currentState
+    val previewResult by produceState<ImagePreviewResult>(initialValue = ImagePreviewResult(null, null, true), key1 = source, key2 = previewState) {
         value = ImagePreviewResult(null, null, true)
         val bitmap = source
         if (bitmap == null) {
             value = ImagePreviewResult(null, null, false)
         } else if (bitmap.isRecycled) {
             value = ImagePreviewResult(null, "The preview image was released. Retry to load it again.", false)
-        } else if (!needsImagePreviewRender(currentState)) {
+        } else if (!needsImagePreviewRender(previewState)) {
             // Opening the editor with no changes should display the decoded source directly.
             // Rendering an identical second bitmap here doubled the editor's initial bitmap memory.
             value = ImagePreviewResult(bitmap, null, false)
@@ -178,7 +181,7 @@ internal fun ImageEditorDialog(
             try {
                 val result = withContext(Dispatchers.Default) {
                     try {
-                        pendingBitmap = renderEditedBitmap(bitmap, currentState)
+                        pendingBitmap = renderEditedBitmap(bitmap, previewState)
                         ImagePreviewResult(pendingBitmap, null, false)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
@@ -335,6 +338,15 @@ internal fun ImageEditorDialog(
                                     draftAnnotation = null
                                 }
                             )
+                            if (!showOriginal && selectedTool == "Crop" && currentState.crop == "Free") {
+                                FreeCropOverlay(
+                                    bitmap = shown,
+                                    crop = currentState.freeCrop ?: fullImageCropRect,
+                                    onDragStart = ::beginSliderEdit,
+                                    onCropChange = { rect -> commitContinuous(historyState.value.current.copy(freeCrop = rect)) },
+                                    onDragFinish = ::finishSliderEdit
+                                )
+                            }
                         }
                         TextButton(
                             onClick = { showOriginal = !showOriginal },
@@ -395,10 +407,10 @@ internal fun ImageEditorDialog(
                             Text("Crop to aspect ratio", style = MaterialTheme.typography.labelLarge)
                             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 listOf("Free", "1:1", "4:3", "3:2", "16:9", "9:16").forEach { ratio ->
-                                    FilterChip(selected = currentState.crop == ratio, onClick = { commit(currentState.copy(crop = ratio)) }, label = { Text(ratio) })
+                                    FilterChip(selected = currentState.crop == ratio, onClick = { commit(currentState.copy(crop = ratio, freeCrop = null)) }, label = { Text(ratio) })
                                 }
                             }
-                            Text("Aspect crops are centered. Choose Free to keep the full image.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if (currentState.crop == "Free") "Drag any crop edge or corner to adjust the free crop." else "Aspect crop is centered on the image.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         "Rotate" -> {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -504,6 +516,7 @@ private fun EditorTool(label: String, icon: androidx.compose.ui.graphics.vector.
 
 @Composable
 private fun MarkupColorPicker(selectedColor: Int, onSelect: (Int) -> Unit) {
+    var showCustomPicker by remember { mutableStateOf(false) }
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         imageMarkupColors.forEachIndexed { index, color ->
             val selected = color == selectedColor
@@ -517,6 +530,95 @@ private fun MarkupColorPicker(selectedColor: Int, onSelect: (Int) -> Unit) {
             ) {
                 if (selected) Icon(Icons.Default.Check, "Selected markup color ${index + 1}", tint = if (color == 0xFFFFFFFF.toInt() || color == 0xFFFDD835.toInt()) Color.Black else Color.White, modifier = Modifier.size(16.dp))
             }
+        }
+        IconButton(
+            onClick = { showCustomPicker = true },
+            modifier = Modifier.size(38.dp).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+        ) { Icon(Icons.Default.Add, "Choose a custom color", tint = MaterialTheme.colorScheme.primary) }
+    }
+    if (showCustomPicker) CustomColorPickerDialog(selectedColor, onDismiss = { showCustomPicker = false }, onSelect = onSelect)
+}
+
+@Composable
+private fun FreeCropOverlay(
+    bitmap: Bitmap?,
+    crop: NormalizedCropRect,
+    onDragStart: () -> Unit,
+    onCropChange: (NormalizedCropRect) -> Unit,
+    onDragFinish: () -> Unit
+) {
+    var canvasSize by remember(bitmap) { mutableStateOf(IntSize.Zero) }
+    val latestCrop by rememberUpdatedState(crop)
+    val latestCropChange by rememberUpdatedState(onCropChange)
+    val latestDragStart by rememberUpdatedState(onDragStart)
+    val latestDragFinish by rememberUpdatedState(onDragFinish)
+    val handleColor = MaterialTheme.colorScheme.primary
+    Canvas(
+        Modifier.fillMaxSize().onSizeChanged { canvasSize = it }
+            .pointerInput(bitmap, canvasSize) {
+                val target = bitmap ?: return@pointerInput
+                val bounds = imageBounds(canvasSize.width.toFloat(), canvasSize.height.toFloat(), target.width, target.height)
+                if (bounds.width <= 0f || bounds.height <= 0f) return@pointerInput
+                var working = latestCrop
+                var draggedEdges = emptySet<CropEdge>()
+                detectDragGestures(
+                    onDragStart = { position ->
+                        val activeCrop = latestCrop
+                        val left = bounds.left + activeCrop.left * bounds.width
+                        val right = bounds.left + activeCrop.right * bounds.width
+                        val top = bounds.top + activeCrop.top * bounds.height
+                        val bottom = bounds.top + activeCrop.bottom * bounds.height
+                        val tolerance = 34.dp.toPx()
+                        val close = buildSet {
+                            if (kotlin.math.abs(position.x - left) <= tolerance) add(CropEdge.Left)
+                            if (kotlin.math.abs(position.y - top) <= tolerance) add(CropEdge.Top)
+                            if (kotlin.math.abs(position.x - right) <= tolerance) add(CropEdge.Right)
+                            if (kotlin.math.abs(position.y - bottom) <= tolerance) add(CropEdge.Bottom)
+                        }
+                        draggedEdges = if (close.isNotEmpty()) close else {
+                            val distances = listOf(
+                                kotlin.math.abs(position.x - left) to CropEdge.Left,
+                                kotlin.math.abs(position.y - top) to CropEdge.Top,
+                                kotlin.math.abs(position.x - right) to CropEdge.Right,
+                                kotlin.math.abs(position.y - bottom) to CropEdge.Bottom
+                            )
+                            setOf(distances.minBy { it.first }.second)
+                        }
+                        working = activeCrop
+                        latestDragStart()
+                    },
+                    onDrag = { change: PointerInputChange, delta ->
+                        change.consume()
+                        working = moveFreeCropEdges(working, draggedEdges, delta.x / bounds.width, delta.y / bounds.height)
+                        latestCropChange(working)
+                    },
+                    onDragEnd = { latestDragFinish() },
+                    onDragCancel = { latestDragFinish() }
+                )
+            }
+    ) {
+        val target = bitmap ?: return@Canvas
+        val bounds = imageBounds(size.width, size.height, target.width, target.height)
+        if (bounds.width <= 0f || bounds.height <= 0f) return@Canvas
+        val activeCrop = latestCrop
+        val left = bounds.left + activeCrop.left * bounds.width
+        val right = bounds.left + activeCrop.right * bounds.width
+        val top = bounds.top + activeCrop.top * bounds.height
+        val bottom = bounds.top + activeCrop.bottom * bounds.height
+        val shade = Color.Black.copy(alpha = .48f)
+        drawRect(shade, Offset(bounds.left, bounds.top), androidx.compose.ui.geometry.Size(bounds.width, (top - bounds.top).coerceAtLeast(0f)))
+        drawRect(shade, Offset(bounds.left, bottom), androidx.compose.ui.geometry.Size(bounds.width, (bounds.top + bounds.height - bottom).coerceAtLeast(0f)))
+        drawRect(shade, Offset(bounds.left, top), androidx.compose.ui.geometry.Size((left - bounds.left).coerceAtLeast(0f), (bottom - top).coerceAtLeast(0f)))
+        drawRect(shade, Offset(right, top), androidx.compose.ui.geometry.Size((bounds.left + bounds.width - right).coerceAtLeast(0f), (bottom - top).coerceAtLeast(0f)))
+        drawRect(Color.White, Offset(left, top), androidx.compose.ui.geometry.Size(right - left, bottom - top), style = Stroke(width = 2.dp.toPx()))
+        val handles = listOf(
+            Offset(left, top), Offset((left + right) / 2f, top), Offset(right, top),
+            Offset(left, (top + bottom) / 2f), Offset(right, (top + bottom) / 2f),
+            Offset(left, bottom), Offset((left + right) / 2f, bottom), Offset(right, bottom)
+        )
+        handles.forEach { point ->
+            drawCircle(Color.White, radius = 7.dp.toPx(), center = point)
+            drawCircle(handleColor, radius = 7.dp.toPx(), center = point, style = Stroke(width = 2.dp.toPx()))
         }
     }
 }
@@ -748,7 +850,10 @@ private fun renderEditedBitmap(source: Bitmap, state: ImageEditState): Bitmap {
         Bitmap.createBitmap(source, 0, 0, source.width, source.height, transform, true)
     } else source
     try {
-        val crop = cropBounds(transformed.width, transformed.height, cropAspect(state.crop))
+        val crop = if (state.crop == "Free") {
+            state.freeCrop?.let { normalizedCropBounds(transformed.width, transformed.height, it) }
+                ?: cropBounds(transformed.width, transformed.height, null)
+        } else cropBounds(transformed.width, transformed.height, cropAspect(state.crop))
         if (crop.left != 0 || crop.top != 0 || crop.right != transformed.width || crop.bottom != transformed.height) {
             val cropped = Bitmap.createBitmap(transformed, crop.left, crop.top, crop.width, crop.height)
             if (transformed !== source && transformed !== cropped && !transformed.isRecycled) transformed.recycle()

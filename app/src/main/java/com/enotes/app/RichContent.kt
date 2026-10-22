@@ -243,6 +243,73 @@ internal fun deleteSheetRow(rows: List<List<String>>, selectedRow: Int): List<Li
     return rows.filterIndexed { index, _ -> index != indexToRemove }
 }
 
+/** Writes a sheet as RFC 4180-style CSV so commas, quotes, and line breaks remain in their cells. */
+internal fun encodeSheetCsv(rows: List<List<String>>): String = rows.joinToString("\r\n") { row ->
+    row.joinToString(",") { value -> "\"${value.replace("\"", "\"\"")}\"" }
+}
+
+/** Parses CSV cells including escaped quotes and quoted newlines, with editor-sized import limits. */
+internal fun parseSheetCsv(source: String): List<List<String>> {
+    val text = source.removePrefix("\uFEFF")
+    if (text.isBlank()) return emptyList()
+    val rows = mutableListOf<List<String>>()
+    val row = mutableListOf<String>()
+    val cell = StringBuilder()
+    var quoted = false
+    var index = 0
+    var rowHasContent = false
+    fun finishCell() {
+        require(row.size < 12) { "A sheet can contain up to 12 columns." }
+        row += cell.toString()
+        cell.setLength(0)
+        rowHasContent = true
+    }
+    fun finishRow() {
+        finishCell()
+        require(rows.size < 100) { "A sheet can contain up to 100 rows." }
+        rows += row.toList()
+        row.clear()
+        rowHasContent = false
+    }
+    while (index < text.length) {
+        val char = text[index]
+        if (quoted) {
+            rowHasContent = true
+            if (char == '"' && text.getOrNull(index + 1) == '"') {
+                cell.append('"')
+                index += 2
+                continue
+            }
+            if (char == '"') quoted = false else cell.append(char)
+        } else {
+            when (char) {
+                '"' -> {
+                    rowHasContent = true
+                    if (cell.isEmpty()) quoted = true else cell.append(char)
+                }
+                ',' -> finishCell()
+                '\n' -> finishRow()
+                '\r' -> {
+                    finishRow()
+                    if (text.getOrNull(index + 1) == '\n') index++
+                }
+                else -> { cell.append(char); rowHasContent = true }
+            }
+        }
+        index++
+    }
+    require(!quoted) { "The CSV file ends inside a quoted cell." }
+    if (cell.isNotEmpty() || row.isNotEmpty() || rowHasContent) finishRow()
+    require(rows.isNotEmpty()) { "The selected CSV file has no sheet data." }
+    val width = rows.maxOf { it.size }
+    return rows.map { values -> values + List((width - values.size).coerceAtLeast(0)) { "" } }
+}
+
+internal fun sheetCsvFilename(title: String): String {
+    val safe = title.trim().replace(Regex("[^A-Za-z0-9._ -]"), "_").trim().take(60).ifBlank { "Sheet" }
+    return if (safe.endsWith(".csv", ignoreCase = true)) safe else "$safe.csv"
+}
+
 internal fun encodeRichContent(blocks: List<RichContentBlock>): String = JSONArray().apply {
     blocks.forEach { block ->
         put(JSONObject().apply {

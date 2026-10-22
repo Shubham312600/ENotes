@@ -10,6 +10,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.view.ViewGroup
 import android.widget.MediaController
+import android.widget.Toast
 import android.widget.VideoView
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -26,6 +27,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -205,6 +208,15 @@ internal fun NoteEditorScreen(
     var showDetails by remember { mutableStateOf(false) }
     var textToolsOpen by remember(note?.id) { mutableStateOf(false) }
     var formattingSelection by remember(note?.id) { mutableStateOf(TextRange.Zero) }
+    var restoreBodyFocus by remember(note?.id) { mutableStateOf(false) }
+
+    LaunchedEffect(textToolsOpen, restoreBodyFocus) {
+        if (!textToolsOpen && restoreBodyFocus) {
+            bodyFocus.requestFocus()
+            keyboard?.show()
+            restoreBodyFocus = false
+        }
+    }
 
     LaunchedEffect(pickedBlock?.id) {
         if (pickedBlock != null && blocks.none { it.id == pickedBlock.id }) {
@@ -246,7 +258,11 @@ internal fun NoteEditorScreen(
         if (next.text != body.text) formattingSelection = TextRange.Zero
         if (next.selection.min < next.selection.max) formattingSelection = next.selection
         bodyStyles = styleRanges ?: remapNoteTextStylesForTextEdit(body.text, next.text, bodyStyles)
-        body = TextFieldValue(styledNoteBody(next.text, bodyStyles), next.selection, next.composition)
+        // A stale IME composing range can reinsert characters that were just backspaced
+        // after styled spans are rebuilt. Deletions end that composition and let the IME
+        // start a fresh one on the next typed character.
+        val composition = if (next.text.length < body.text.length) null else next.composition
+        body = TextFieldValue(styledNoteBody(next.text, bodyStyles), next.selection, composition)
         syncBodyFormatBlock()
     }
 
@@ -551,7 +567,7 @@ internal fun NoteEditorScreen(
                         syncBodyFormatBlock()
                     }
                 },
-                onDone = { textToolsOpen = false; bodyFocus.requestFocus() }
+                onDone = { restoreBodyFocus = true; textToolsOpen = false }
             )
         }
 
@@ -614,6 +630,8 @@ private fun TextFormattingDialog(
     onDone: () -> Unit
 ) {
     var fontSize by remember { mutableFloatStateOf(18f) }
+    var showTextColorPicker by remember { mutableStateOf(false) }
+    var showHighlightColorPicker by remember { mutableStateOf(false) }
     val colors = listOf(0xFF202033.toInt(), 0xFFD32F2F.toInt(), 0xFFEF6C00.toInt(), 0xFF388E3C.toInt(), 0xFF1976D2.toInt(), 0xFF7B1FA2.toInt())
     val highlights = listOf(0xFFFFF176.toInt(), 0xFFFFCC80.toInt(), 0xFFA5D6A7.toInt(), 0xFF90CAF9.toInt(), 0xFFE1BEE7.toInt(), 0xFFF8BBD0.toInt())
     AlertDialog(
@@ -643,20 +661,26 @@ private fun TextFormattingDialog(
                 }
 
                 Text("Text color", style = MaterialTheme.typography.labelLarge)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
                     colors.forEach { color ->
                         Box(Modifier.size(30.dp).clip(CircleShape).background(Color(color)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
                             .clickable(enabled = selectionExists) { onTextColor(color) })
                     }
+                    IconButton(onClick = { showTextColorPicker = true }, enabled = selectionExists, modifier = Modifier.size(34.dp).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)) {
+                        Icon(Icons.Default.Add, "Choose a custom text color", tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
 
                 Text("Highlight", style = MaterialTheme.typography.labelLarge)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     highlights.forEach { color ->
                         Box(Modifier.size(28.dp).clip(CircleShape).background(Color(color)).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
                             .clickable(enabled = selectionExists) { onHighlight(color) })
                     }
                     TextButton(onClick = { onHighlight(null) }, enabled = selectionExists) { Text("Clear") }
+                    IconButton(onClick = { showHighlightColorPicker = true }, enabled = selectionExists, modifier = Modifier.size(34.dp).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)) {
+                        Icon(Icons.Default.Add, "Choose a custom highlight color", tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
 
                 Text("Alignment · applies to the note text", style = MaterialTheme.typography.labelLarge)
@@ -679,6 +703,16 @@ private fun TextFormattingDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDone) { Text("Done") } }
+    )
+    if (showTextColorPicker) CustomColorPickerDialog(
+        initialColor = colors.first(),
+        onDismiss = { showTextColorPicker = false },
+        onSelect = onTextColor
+    )
+    if (showHighlightColorPicker) CustomColorPickerDialog(
+        initialColor = highlights.first(),
+        onDismiss = { showHighlightColorPicker = false },
+        onSelect = { onHighlight(it) }
     )
 }
 
@@ -764,6 +798,44 @@ private fun RichContentCard(
     onSkin: () -> Unit,
     onPaste: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val latestBlock by rememberUpdatedState(block)
+    val latestOnChange by rememberUpdatedState(onChange)
+    val importSheetLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            try {
+                val importedRows = withContext(Dispatchers.IO) {
+                    val csv = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                        ?: error("The selected file could not be opened.")
+                    parseSheetCsv(csv)
+                }
+                latestOnChange(latestBlock.copy(rows = importedRows))
+                Toast.makeText(context, "Sheet imported", Toast.LENGTH_SHORT).show()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Toast.makeText(context, error.message ?: "Could not import this CSV file", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    val exportSheetLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) scope.launch {
+            try {
+                val rows = editableSheetRows(latestBlock.rows)
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { writer ->
+                        writer.write(encodeSheetCsv(rows))
+                    } ?: error("The CSV file could not be created.")
+                }
+                Toast.makeText(context, "Sheet exported", Toast.LENGTH_SHORT).show()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Toast.makeText(context, error.message ?: "Could not export this sheet", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     val bg = skinColor(block.skin)
     var viewerOpen by remember(block.id) { mutableStateOf(false) }
     var editorOpen by remember(block.id) { mutableStateOf(false) }
@@ -780,7 +852,15 @@ private fun RichContentCard(
                 else -> Icons.Default.InsertDriveFile
             }, null, tint = if (block.kind == "video") editorBlue else editorPurple)
             Text(when (block.kind) { "image" -> "Image"; "video" -> "Video"; "audio" -> "Audio"; "sheet" -> "Sheet"; "checklist" -> "Checklist"; else -> "Attachment" }, Modifier.weight(1f).padding(start = 8.dp), color = editorText, fontWeight = FontWeight.SemiBold)
-            if (block.kind == "sheet") TextButton(onClick = onSkin, contentPadding = PaddingValues(horizontal = 8.dp)) { Icon(Icons.Default.Palette, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(4.dp)); Text("Skins") }
+            if (block.kind == "sheet") {
+                IconButton(onClick = { importSheetLauncher.launch(arrayOf("text/*", "application/csv", "application/vnd.ms-excel")) }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.FileUpload, "Import sheet from CSV", tint = editorPurple, modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = { exportSheetLauncher.launch(sheetCsvFilename(block.title)) }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.FileDownload, "Export sheet as CSV", tint = editorPurple, modifier = Modifier.size(18.dp))
+                }
+                TextButton(onClick = onSkin, contentPadding = PaddingValues(horizontal = 6.dp)) { Icon(Icons.Default.Palette, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(4.dp)); Text("Skins") }
+            }
             if (block.uri != null && block.kind == "image") {
                 TextButton(onClick = { editorOpen = true }, contentPadding = PaddingValues(horizontal = 5.dp), modifier = Modifier.height(40.dp)) {
                     Icon(Icons.Default.Edit, "Edit image", tint = editorPurple, modifier = Modifier.size(17.dp))

@@ -54,6 +54,42 @@ internal data class PixelRect(val left: Int, val top: Int, val right: Int, val b
     val height: Int get() = bottom - top
 }
 
+/** Normalized free-crop coordinates, independent of preview size and source resolution. */
+internal data class NormalizedCropRect(val left: Float, val top: Float, val right: Float, val bottom: Float)
+
+internal val fullImageCropRect = NormalizedCropRect(0f, 0f, 1f, 1f)
+
+internal enum class CropEdge { Left, Top, Right, Bottom }
+
+/** Moves one or more crop edges while keeping a usable rectangle inside the image. */
+internal fun moveFreeCropEdges(
+    rect: NormalizedCropRect,
+    edges: Set<CropEdge>,
+    deltaX: Float,
+    deltaY: Float,
+    minimumSize: Float = .04f
+): NormalizedCropRect {
+    val minSize = minimumSize.coerceIn(.001f, 1f)
+    var left = rect.left.coerceIn(0f, 1f - minSize)
+    var top = rect.top.coerceIn(0f, 1f - minSize)
+    var right = rect.right.coerceIn(left + minSize, 1f)
+    var bottom = rect.bottom.coerceIn(top + minSize, 1f)
+    if (CropEdge.Left in edges) left = (left + deltaX).coerceIn(0f, right - minSize)
+    if (CropEdge.Right in edges) right = (right + deltaX).coerceIn(left + minSize, 1f)
+    if (CropEdge.Top in edges) top = (top + deltaY).coerceIn(0f, bottom - minSize)
+    if (CropEdge.Bottom in edges) bottom = (bottom + deltaY).coerceIn(top + minSize, 1f)
+    return NormalizedCropRect(left, top, right, bottom)
+}
+
+internal fun normalizedCropBounds(width: Int, height: Int, rect: NormalizedCropRect): PixelRect {
+    if (width <= 0 || height <= 0) return PixelRect(0, 0, width.coerceAtLeast(0), height.coerceAtLeast(0))
+    val left = (rect.left.coerceIn(0f, 1f) * width).roundToInt().coerceIn(0, width - 1)
+    val top = (rect.top.coerceIn(0f, 1f) * height).roundToInt().coerceIn(0, height - 1)
+    val right = (rect.right.coerceIn(0f, 1f) * width).roundToInt().coerceIn(left + 1, width)
+    val bottom = (rect.bottom.coerceIn(0f, 1f) * height).roundToInt().coerceIn(top + 1, height)
+    return PixelRect(left, top, right, bottom)
+}
+
 internal fun cropBounds(width: Int, height: Int, aspect: Float?): PixelRect {
     if (width <= 0 || height <= 0 || aspect == null || aspect <= 0f || !aspect.isFinite()) {
         return PixelRect(0, 0, width.coerceAtLeast(0), height.coerceAtLeast(0))
@@ -111,6 +147,7 @@ internal data class ImageEditState(
     val flipHorizontal: Boolean = false,
     val flipVertical: Boolean = false,
     val crop: String = "Free",
+    val freeCrop: NormalizedCropRect? = null,
     val brightness: Float = 0f,
     val contrast: Float = 1f,
     val saturation: Float = 1f,
