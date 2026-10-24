@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: enotes-auth-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips='*'
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DEV_MAIL_SINK
+        value: "false"
+      - key: PUBLIC_APP_URL
+        value: enotes://reset-password
