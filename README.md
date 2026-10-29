@@ -2,6 +2,10 @@
 
 ENotes is an Android notes app built with Kotlin, Jetpack Compose, and Room.
 
+## Download APK
+
+[Download the latest debug APK](downloads/ENotes-debug.apk). It is a test build, not a production-signed release.
+
 ## Implemented in the current prototype
 
 - Local-first note creation and editing
