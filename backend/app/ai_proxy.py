@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -12,7 +14,29 @@ from .config import Settings
 
 PROVIDERS = {"groq", "gemini", "glm"}
 PROVIDER_LABELS = {"groq": "Groq", "gemini": "Gemini", "glm": "GLM"}
+GEMINI_MODELS_MAX_PAGES = 20
 GLM_MODEL_CATALOG_URL = "https://docs.z.ai/openapi.json"
+logger = logging.getLogger(__name__)
+
+
+class _RedactPageTokenFilter(logging.Filter):
+    _page_token_pattern = re.compile(r"([?&]pageToken=)[^&\s\"']*", re.IGNORECASE)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = self._page_token_pattern.sub(r"\1[REDACTED]", message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+# HTTPX logs request URLs at INFO level, which includes query parameters. Keep
+# opaque Google pagination tokens out of those logs even when HTTPX INFO is on.
+_httpx_logger = logging.getLogger("httpx")
+if not any(isinstance(item, _RedactPageTokenFilter) for item in _httpx_logger.filters):
+    _httpx_logger.addFilter(_RedactPageTokenFilter())
+
 BASE_URLS = {
     "groq": "https://api.groq.com/openai/v1",
     # Keep the API version in request paths below so it is included exactly once.
@@ -112,6 +136,7 @@ async def request_provider(
     *,
     method: str = "GET",
     payload: dict[str, Any] | None = None,
+    params: dict[str, str] | None = None,
     operation: str = "models",
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
@@ -123,7 +148,7 @@ async def request_provider(
         headers["Content-Type"] = "application/json"
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(40.0, connect=12.0), follow_redirects=False, transport=transport) as client:
-            response = await client.request(method, url, headers=headers, json=payload)
+            response = await client.request(method, url, headers=headers, json=payload, params=params)
     except httpx.TimeoutException as error:
         raise ProviderApiError(provider, "network_error", f"Unable to connect to {PROVIDER_LABELS[provider]}. Check your network connection.", 0, "Request timed out.") from error
     except httpx.HTTPError as error:
@@ -254,6 +279,60 @@ def require_verified_free_model(settings: Settings, provider: str, model_id: str
         )
 
 
+async def _gemini_model_records(
+    api_key: str,
+    transport: httpx.AsyncBaseTransport | None,
+) -> tuple[list[Any], int, str | None, ProviderApiError | None]:
+    """Fetch bounded pages from Google's model catalog without exposing page tokens."""
+    records: list[Any] = []
+    requested_tokens: set[str] = set()
+    page_token: str | None = None
+    pages_retrieved = 0
+
+    while pages_retrieved < GEMINI_MODELS_MAX_PAGES:
+        params = {"pageToken": page_token} if page_token is not None else None
+        if page_token is not None:
+            requested_tokens.add(page_token)
+        try:
+            root = await request_provider(
+                "gemini", api_key, "/v1beta/models", params=params, transport=transport,
+            )
+        except ProviderApiError as error:
+            return records, pages_retrieved, None, error
+        pages_retrieved += 1
+        page_records = root.get("models")
+        if not isinstance(page_records, list):
+            return records, pages_retrieved, None, ProviderApiError(
+                "gemini", "unknown_error",
+                "Gemini connection failed. Check the technical error details.",
+                502, "Model-list response did not contain the documented model array.",
+            )
+        records.extend(page_records)
+
+        next_page_token = root.get("nextPageToken")
+        if next_page_token is None or next_page_token == "":
+            return records, pages_retrieved, None, None
+        if not isinstance(next_page_token, str):
+            return records, pages_retrieved, "malformed_page_token", None
+        if next_page_token in requested_tokens:
+            return records, pages_retrieved, "repeated_page_token", None
+        if pages_retrieved >= GEMINI_MODELS_MAX_PAGES:
+            return records, pages_retrieved, "maximum_pages_reached", None
+        page_token = next_page_token
+
+    # The loop can only end this way if the configured limit is nonpositive.
+    return records, pages_retrieved, "maximum_pages_reached", None
+
+
+def _log_gemini_model_discovery(stats: dict[str, int | bool | str]) -> None:
+    # Only fixed labels and counters are logged. Never include IDs, provider
+    # payloads, credentials, or opaque pagination tokens in this event.
+    logger.info(
+        "Gemini model discovery diagnostics: %s",
+        json.dumps({"event": "gemini_model_discovery", **stats}, separators=(",", ":"), sort_keys=True),
+    )
+
+
 async def list_provider_models(
     settings: Settings,
     provider: str,
@@ -283,18 +362,36 @@ async def list_provider_models(
                 "Z.AI's published model catalog has an unexpected format. Retry later.",
                 502, "The official API schema chat model enum was malformed.",
             )
+    elif provider == "gemini":
+        values, pages_retrieved, pagination_issue, deferred_error = await _gemini_model_records(api_key, transport)
     else:
-        path = "/v1beta/models" if provider == "gemini" else "/models"
-        root = await request_provider(provider, api_key, path, transport=transport)
-        values = root.get("models") if provider == "gemini" else root.get("data")
+        root = await request_provider(provider, api_key, "/models", transport=transport)
+        values = root.get("data")
     if not isinstance(values, list):
         raise ProviderApiError(provider, "unknown_error", f"{PROVIDER_LABELS[provider]} connection failed. Check the technical error details.", 502, "Model-list response did not contain the documented model array.")
     models: list[dict[str, str]] = []
     seen: set[str] = set()
+    gemini_stats: dict[str, int | bool | str] | None = None
+    if provider == "gemini":
+        gemini_stats = {
+            "free_only": free_only,
+            "outcome": "upstream_error" if deferred_error is not None else "pagination_error" if pagination_issue is not None else "success",
+            "upstream_records_received": len(values),
+            "valid_base_model_id_records": 0,
+            "generate_content_records": 0,
+            "rejected_unsupported_or_malformed_records": 0,
+            "duplicate_model_records": 0,
+            "verified_free_models": 0,
+            "pricing_filtered_unknown": 0,
+            "pricing_filtered_paid": 0,
+            "pages_retrieved": pages_retrieved,
+        }
     for item in values:
         if provider == "glm":
             model_id = item.strip() if isinstance(item, str) else ""
         elif not isinstance(item, dict):
+            if gemini_stats is not None:
+                gemini_stats["rejected_unsupported_or_malformed_records"] += 1
             continue
         elif provider == "gemini":
             # `name` is a versioned resource name. Google documents
@@ -304,19 +401,52 @@ async def list_provider_models(
         else:
             raw_model_id = item.get("id")
             model_id = raw_model_id.strip() if isinstance(raw_model_id, str) else ""
-        if not model_id or model_id == "null" or len(model_id) > 200 or model_id in seen:
+        valid_model_id = bool(model_id) and model_id != "null" and len(model_id) <= 200
+        supports_generation = True
+        if provider == "gemini":
+            methods = item.get("supportedGenerationMethods")
+            supports_generation = isinstance(methods, list) and "generateContent" in methods
+            assert gemini_stats is not None
+            if valid_model_id:
+                gemini_stats["valid_base_model_id_records"] += 1
+            if supports_generation:
+                gemini_stats["generate_content_records"] += 1
+            if not valid_model_id or not supports_generation:
+                gemini_stats["rejected_unsupported_or_malformed_records"] += 1
+                continue
+        if not valid_model_id:
+            continue
+        if model_id in seen:
+            if gemini_stats is not None:
+                gemini_stats["duplicate_model_records"] += 1
             continue
         if provider == "groq" and item.get("active") is False:
             continue
-        if provider == "gemini":
-            methods = item.get("supportedGenerationMethods")
-            if not isinstance(methods, list) or "generateContent" not in methods:
-                continue
         seen.add(model_id)
         pricing_status = model_pricing_status(settings, provider, model_id, strict=free_only)
+        if gemini_stats is not None and pricing_status == "verified_free":
+            gemini_stats["verified_free_models"] += 1
         if free_only and pricing_status != "verified_free":
+            if gemini_stats is not None:
+                field = "pricing_filtered_paid" if pricing_status == "paid" else "pricing_filtered_unknown"
+                gemini_stats[field] += 1
             continue
         models.append({"id": model_id, "pricing_status": pricing_status})
+    if gemini_stats is not None:
+        _log_gemini_model_discovery(gemini_stats)
+        if deferred_error is not None:
+            raise deferred_error
+        if pagination_issue is not None:
+            reasons = {
+                "malformed_page_token": "Google returned a malformed pagination token.",
+                "repeated_page_token": "Google repeated a pagination token.",
+                "maximum_pages_reached": "The model catalog exceeded the pagination limit.",
+            }
+            raise ProviderApiError(
+                "gemini", "model_discovery_unavailable",
+                "Gemini's model catalog could not be fully loaded. Retry later.",
+                502, reasons[pagination_issue],
+            )
     return sorted(models, key=lambda item: item["id"].casefold())
 
 

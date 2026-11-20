@@ -306,6 +306,147 @@ def test_gemini_discovery_uses_base_model_ids_and_omits_unsupported_models(clien
     assert [item["id"] for item in response.json()["data"]] == ["gemini-fast"]
 
 
+def _gemini_catalog_record(model_id: str, methods: list[str] | None = None) -> dict:
+    return {
+        "name": f"models/{model_id}-versioned",
+        "baseModelId": model_id,
+        "supportedGenerationMethods": methods if methods is not None else ["generateContent"],
+    }
+
+
+def test_gemini_model_discovery_follows_all_pages_and_includes_page_two_models(client: TestClient) -> None:
+    headers = sign_in(client, "gemini-pagination@example.com")
+    assert client.put("/api/v1/ai/gemini/credential", headers=headers, json={"api_key": "gemini-pagination-test-key"}).status_code == 200
+    calls: list[httpx.Request] = []
+    pages = {
+        None: {"models": [_gemini_catalog_record("page-one-model")], "nextPageToken": "opaque-page-token-one"},
+        "opaque-page-token-one": {"models": [_gemini_catalog_record("page-two-model")], "nextPageToken": "opaque-page-token-two"},
+        "opaque-page-token-two": {"models": [_gemini_catalog_record("page-three-model")]},
+    }
+
+    def handler(request: httpx.Request):
+        calls.append(request)
+        assert request.url.path == "/v1beta/models"
+        assert request.headers["x-goog-api-key"] == "gemini-pagination-test-key"
+        return httpx.Response(200, json=pages[request.url.params.get("pageToken")])
+
+    mock_transport(client, handler)
+    response = client.get("/api/v1/ai/gemini/models", headers=headers)
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["data"]] == [
+        "page-one-model", "page-three-model", "page-two-model",
+    ]
+    assert len(calls) == 3
+    assert calls[0].url.params.get("pageToken") is None
+    assert calls[1].url.params["pageToken"] == "opaque-page-token-one"
+    assert calls[2].url.params["pageToken"] == "opaque-page-token-two"
+
+
+@pytest.mark.parametrize("payload,expected_ids", [
+    ({"models": []}, []),
+    ({"models": [_gemini_catalog_record("single-page-model")]}, ["single-page-model"]),
+])
+def test_gemini_model_discovery_accepts_empty_and_single_page_without_token(
+    client: TestClient, payload: dict, expected_ids: list[str],
+) -> None:
+    headers = sign_in(client, f"gemini-terminal-page-{len(expected_ids)}@example.com")
+    assert client.put("/api/v1/ai/gemini/credential", headers=headers, json={"api_key": "gemini-test-secret-value"}).status_code == 200
+    calls: list[httpx.Request] = []
+    mock_transport(client, lambda request: (calls.append(request), httpx.Response(200, json=payload))[1])
+    response = client.get("/api/v1/ai/gemini/models", headers=headers)
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["data"]] == expected_ids
+    assert len(calls) == 1
+
+
+def test_gemini_repeated_page_token_fails_safely_and_diagnostics_hide_secrets(caplog, client: TestClient) -> None:
+    headers = sign_in(client, "gemini-repeated-token@example.com")
+    api_key = "gemini-do-not-log-this-key"
+    page_token = "opaque-do-not-log-this-token"
+    assert client.put("/api/v1/ai/gemini/credential", headers=headers, json={"api_key": api_key}).status_code == 200
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(200, json={
+                "models": [_gemini_catalog_record("private-model-id-do-not-log")],
+                "nextPageToken": page_token,
+            })
+        return httpx.Response(200, json={"models": [], "nextPageToken": page_token})
+
+    mock_transport(client, handler)
+    with caplog.at_level("INFO"):
+        response = client.get("/api/v1/ai/gemini/models", headers=headers)
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "model_discovery_unavailable"
+    assert page_token not in response.text
+    assert len(calls) == 2
+    log_text = caplog.text
+    assert api_key not in log_text
+    assert page_token not in log_text
+    assert "private-model-id-do-not-log" not in log_text
+    assert "[REDACTED]" in log_text
+    assert '"pages_retrieved":2' in log_text
+
+
+def test_gemini_model_discovery_stops_at_configured_page_limit(monkeypatch, client: TestClient) -> None:
+    from app import ai_proxy
+
+    monkeypatch.setattr(ai_proxy, "GEMINI_MODELS_MAX_PAGES", 2)
+    headers = sign_in(client, "gemini-page-limit@example.com")
+    assert client.put("/api/v1/ai/gemini/credential", headers=headers, json={"api_key": "gemini-test-secret-value"}).status_code == 200
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request):
+        calls.append(request)
+        next_token = "limit-token-one" if len(calls) == 1 else "limit-token-two"
+        return httpx.Response(200, json={"models": [], "nextPageToken": next_token})
+
+    mock_transport(client, handler)
+    response = client.get("/api/v1/ai/gemini/models", headers=headers)
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "model_discovery_unavailable"
+    assert len(calls) == 2
+    assert response.json().get("data") is None
+    assert "limit-token" not in response.text
+
+
+def test_gemini_free_only_uses_exact_allowlist_and_logs_only_safe_counts(caplog) -> None:
+    free = '{"gemini":["verified-free"]}'
+    paid = '{"gemini":["paid-model"]}'
+    with _ai_client_with_allowlists(free, paid) as client:
+        headers = sign_in(client, "gemini-exact-allowlist@example.com")
+        assert client.put("/api/v1/ai/gemini/credential", headers=headers, json={"api_key": "gemini-do-not-log-this-key"}).status_code == 200
+        assert client.put("/api/v1/ai/settings/free-only", headers=headers, json={"enabled": True}).status_code == 200
+        mock_transport(client, lambda _request: httpx.Response(200, json={"models": [
+            _gemini_catalog_record("verified-free"),
+            _gemini_catalog_record("Verified-free"),
+            _gemini_catalog_record("verified-free-preview"),
+            _gemini_catalog_record("paid-model"),
+            _gemini_catalog_record("unknown-model"),
+            {"baseModelId": "missing-methods"},
+            _gemini_catalog_record("embedding-only", ["embedContent"]),
+            {"supportedGenerationMethods": ["generateContent"]},
+            {"baseModelId": "  ", "supportedGenerationMethods": ["generateContent"]},
+            None,
+        ]}))
+        with caplog.at_level("INFO", logger="app.ai_proxy"):
+            response = client.get("/api/v1/ai/gemini/models", headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["data"] == [{"id": "verified-free", "pricing_status": "verified_free"}]
+        assert '"upstream_records_received":10' in caplog.text
+        assert '"valid_base_model_id_records":7' in caplog.text
+        assert '"generate_content_records":7' in caplog.text
+        assert '"rejected_unsupported_or_malformed_records":5' in caplog.text
+        assert '"verified_free_models":1' in caplog.text
+        assert '"pricing_filtered_unknown":3' in caplog.text
+        assert '"pricing_filtered_paid":1' in caplog.text
+        assert "gemini-do-not-log-this-key" not in caplog.text
+        for model_id in ("verified-free", "Verified-free", "paid-model", "unknown-model"):
+            assert model_id not in caplog.text
+
+
 @pytest.mark.parametrize("payload", [
     {"models": "not-an-array"},
     ["not-an-object"],
