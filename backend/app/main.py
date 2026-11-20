@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from .config import Settings
 from .database import Base, build_engine, build_session_factory
-from .models import AuthSession, PasswordResetToken, User, new_id
+from .models import AIProviderCredential, AIUserPreference, AuthSession, PasswordResetToken, User, new_id
 from .rate_limit import RateLimiter, limit_request
 from .schemas import (
     Credentials,
@@ -31,10 +31,15 @@ from .schemas import (
     PasswordResetRequest,
     RefreshRequest,
     RegisterRequest,
+    AIChatProxyRequest,
+    AIFreeOnlyRequest,
+    AIProviderCredentialRequest,
     SessionResponse,
     UserResponse,
 )
 from .security import decode_access_token, hash_password, hash_secret, new_opaque_token, issue_access_token, verify_password
+from .ai_security import CredentialVaultUnavailable, decrypt_provider_key, encrypt_provider_key
+from .ai_proxy import PROVIDERS, ProviderApiError, chat_provider, list_provider_models, test_provider_model
 
 
 def failure(status: int, code: str, message: str) -> None:
@@ -63,9 +68,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def enforce_auth_body_size(request: Request, call_next):
-        if request.url.path.startswith("/api/v1/auth/"):
+        if request.url.path.startswith("/api/v1/auth/") or request.url.path.startswith("/api/v1/ai/"):
             content_length = request.headers.get("content-length", "")
-            if content_length.isdigit() and int(content_length) > 16_384:
+            max_body = 12 * 1024 * 1024 if request.url.path.startswith("/api/v1/ai/") else 16_384
+            if content_length.isdigit() and int(content_length) > max_body:
                 return JSONResponse(status_code=413, content={"error": {"code": "request_too_large", "message": "Request body is too large."}})
         return await call_next(request)
 
@@ -93,6 +99,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if auth_session is None or auth_session.user_id != user_id or auth_session.revoked_at is not None or auth_session.expires_at <= int(time.time()) or user is None or not user.is_active:
             failure(401, "inactive_session", "Your session has expired. Sign in again.")
         return user
+
+    def checked_provider(provider: str) -> str:
+        value = provider.strip().lower()
+        if value not in PROVIDERS:
+            failure(404, "provider_not_supported", "This AI provider is not supported by the secure gateway.")
+        return value
+
+    def provider_credential(db: Session, user: User, provider: str) -> tuple[AIProviderCredential | None, str]:
+        row = db.scalar(select(AIProviderCredential).where(
+            AIProviderCredential.user_id == user.id,
+            AIProviderCredential.provider_id == provider,
+        ))
+        if row is not None:
+            try:
+                return row, decrypt_provider_key(config, user.id, provider, row.encrypted_key)
+            except CredentialVaultUnavailable:
+                # A service-managed key can keep the provider usable if a user's
+                # separately stored credential cannot be decrypted.
+                service_key = config.provider_api_key(provider)
+                if service_key:
+                    return row, service_key
+                failure(503, "credential_vault_unavailable", "Saved provider credentials cannot be opened. Re-enter the provider key in ENotes AI settings.")
+        service_key = config.provider_api_key(provider)
+        if service_key:
+            return None, service_key
+        failure(412, "missing_provider_key", f"Add a {provider.upper()} API key in ENotes AI settings or configure the service key.")
+
+    def provider_error_response(error: ProviderApiError) -> None:
+        raise HTTPException(status_code=error.status or 502, detail={
+            "code": error.code,
+            "provider": error.provider,
+            "message": error.message,
+            "technical_details": error.technical_details,
+        })
+
+    def free_only_for(db: Session, user: User) -> bool:
+        preference = db.get(AIUserPreference, user.id)
+        return bool(preference and preference.free_only)
+
+    def ai_transport(request: Request):
+        return getattr(request.app.state, "ai_http_transport", None)
 
     @app.exception_handler(HTTPException)
     async def http_error_handler(_request: Request, exc: HTTPException):
@@ -174,6 +221,138 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     def health():
         return {"status": "ok", "service": "enotes-auth"}
+
+    @app.get("/api/v1/ai/settings")
+    def get_ai_settings(db: Session = Depends(get_db), user: User = Depends(current_user)):
+        return {"free_only": free_only_for(db, user)}
+
+    @app.put("/api/v1/ai/settings/free-only")
+    def update_ai_free_only(body: AIFreeOnlyRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+        limit_request(request, "ai-settings", 20, 60)
+        preference = db.get(AIUserPreference, user.id)
+        if preference is None:
+            preference = AIUserPreference(user_id=user.id, free_only=body.enabled)
+            db.add(preference)
+        else:
+            preference.free_only = body.enabled
+        db.commit()
+        return {"free_only": preference.free_only}
+
+    @app.get("/api/v1/ai/{provider}/credential")
+    def get_ai_credential(provider: str, db: Session = Depends(get_db), user: User = Depends(current_user)):
+        provider = checked_provider(provider)
+        row = db.scalar(select(AIProviderCredential).where(
+            AIProviderCredential.user_id == user.id,
+            AIProviderCredential.provider_id == provider,
+        ))
+        source = "missing"
+        credential_usable = False
+        if row is not None:
+            try:
+                decrypt_provider_key(config, user.id, provider, row.encrypted_key)
+                credential_usable = True
+                source = "user"
+            except CredentialVaultUnavailable:
+                credential_usable = False
+        if not credential_usable and config.provider_api_key(provider):
+            credential_usable = True
+            source = "service"
+        return {
+            "provider": provider,
+            "configured": credential_usable,
+            "saved": row is not None,
+            "credential_usable": credential_usable,
+            "credential_source": source,
+            "connected": False,
+            "updated_at": row.updated_at if row else None,
+        }
+
+    @app.put("/api/v1/ai/{provider}/credential")
+    def save_ai_credential(provider: str, body: AIProviderCredentialRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+        provider = checked_provider(provider)
+        limit_request(request, f"ai-credential-{provider}", 8, 3600)
+        api_key = body.api_key.get_secret_value().strip()
+        if len(api_key) < 8 or len(api_key) > 512 or any(ord(char) < 33 or ord(char) > 126 for char in api_key):
+            failure(422, "invalid_provider_key_format", f"Enter a valid {provider.upper()} API key.")
+        try:
+            sealed = encrypt_provider_key(config, user.id, provider, api_key)
+        except CredentialVaultUnavailable as error:
+            failure(503, "credential_vault_unavailable", str(error))
+        row = db.scalar(select(AIProviderCredential).where(
+            AIProviderCredential.user_id == user.id,
+            AIProviderCredential.provider_id == provider,
+        ))
+        if row is None:
+            row = AIProviderCredential(user_id=user.id, provider_id=provider, encrypted_key=sealed, updated_at=int(time.time()))
+            db.add(row)
+        else:
+            row.encrypted_key = sealed
+            row.updated_at = int(time.time())
+        db.commit()
+        return {"provider": provider, "configured": True, "credential_usable": True, "credential_source": "user", "connected": False, "updated_at": row.updated_at}
+
+    @app.delete("/api/v1/ai/{provider}/credential")
+    def delete_ai_credential(provider: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+        provider = checked_provider(provider)
+        limit_request(request, f"ai-credential-{provider}", 8, 3600)
+        row = db.scalar(select(AIProviderCredential).where(
+            AIProviderCredential.user_id == user.id,
+            AIProviderCredential.provider_id == provider,
+        ))
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        service_configured = bool(config.provider_api_key(provider))
+        return {
+            "provider": provider,
+            "configured": service_configured,
+            "credential_usable": service_configured,
+            "credential_source": "service" if service_configured else "missing",
+        }
+
+    @app.get("/api/v1/ai/{provider}/models")
+    async def ai_models(provider: str, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+        provider = checked_provider(provider)
+        limit_request(request, f"ai-models-{provider}", 30, 60)
+        _row, api_key = provider_credential(db, user, provider)
+        try:
+            models = await list_provider_models(
+                config,
+                provider,
+                api_key,
+                ai_transport(request),
+                free_only=free_only_for(db, user),
+            )
+        except ProviderApiError as error:
+            provider_error_response(error)
+        return {"provider": provider, "data": models, "free_only": free_only_for(db, user)}
+
+    @app.post("/api/v1/ai/{provider}/test")
+    async def ai_test(provider: str, body: AIChatProxyRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+        provider = checked_provider(provider)
+        limit_request(request, f"ai-test-{provider}", 15, 60)
+        _row, api_key = provider_credential(db, user, provider)
+        try:
+            await test_provider_model(config, provider, api_key, body.model_id, free_only=free_only_for(db, user), transport=ai_transport(request))
+        except ProviderApiError as error:
+            provider_error_response(error)
+        return {"provider": provider, "model_id": body.model_id, "connected": True}
+
+    @app.post("/api/v1/ai/{provider}/chat")
+    async def ai_chat(provider: str, body: AIChatProxyRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)):
+        provider = checked_provider(provider)
+        limit_request(request, f"ai-chat-{provider}", 30, 60)
+        _row, api_key = provider_credential(db, user, provider)
+        try:
+            result = await chat_provider(
+                config, provider, api_key, body.model_dump(),
+                free_only=free_only_for(db, user), transport=ai_transport(request),
+            )
+        except ProviderApiError as error:
+            provider_error_response(error)
+        except ValueError as error:
+            failure(422, "invalid_chat_request", str(error))
+        return result
 
     @app.post("/api/v1/auth/register", response_model=SessionResponse, status_code=201)
     def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 
 def valid_email(value: str) -> str:
@@ -95,3 +96,17 @@ class SessionResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class AIProviderCredentialRequest(BaseModel):
+    api_key: SecretStr = Field(min_length=8, max_length=512)
+
+
+class AIFreeOnlyRequest(BaseModel):
+    enabled: bool
+
+
+class AIChatProxyRequest(BaseModel):
+    model_id: str = Field(min_length=1, max_length=200)
+    system_instruction: str = Field(default="", max_length=12_000)
+    messages: list[dict[str, Any]] = Field(min_length=1, max_length=32)

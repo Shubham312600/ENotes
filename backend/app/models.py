@@ -49,3 +49,19 @@ class PasswordResetToken(Base):
     expires_at: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     used_at: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     user: Mapped[User] = relationship(back_populates="reset_tokens")
+
+
+class AIProviderCredential(Base):
+    __tablename__ = "ai_provider_credentials"
+    __table_args__ = (UniqueConstraint("user_id", "provider_id", name="uq_ai_provider_credential_user_provider"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    encrypted_key: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class AIUserPreference(Base):
+    __tablename__ = "ai_user_preferences"
+    user_id: Mapped[str] = mapped_column(ForeignKey("auth_users.id", ondelete="CASCADE"), primary_key=True)
+    free_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

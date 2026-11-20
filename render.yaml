@@ -18,3 +18,11 @@ services:
         value: "false"
       - key: PUBLIC_APP_URL
         value: enotes://reset-password
+      - key: AI_CREDENTIALS_ENCRYPTION_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GLM_API_KEY
+        sync: false

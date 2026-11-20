@@ -5,6 +5,7 @@ import secrets
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
+from pydantic import SecretStr
 
 from .database import normalize_database_url
 
@@ -33,6 +34,12 @@ class Settings:
     login_limit: int = 8
     register_limit: int = 5
     reset_limit: int = 5
+    ai_credentials_encryption_key: str = ""
+    ai_verified_free_models: str = "{}"
+    ai_verified_paid_models: str = "{}"
+    gemini_api_key: SecretStr = SecretStr("")
+    groq_api_key: SecretStr = SecretStr("")
+    glm_api_key: SecretStr = SecretStr("")
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -78,7 +85,18 @@ class Settings:
             resend_api_key=resend_api_key,
             resend_from_email=resend_from_email,
             auto_create_schema=environment != "production",
+            ai_credentials_encryption_key=os.getenv("AI_CREDENTIALS_ENCRYPTION_KEY", "").strip(),
+            ai_verified_free_models=os.getenv("AI_VERIFIED_FREE_MODELS", "{}").strip() or "{}",
+            ai_verified_paid_models=os.getenv("AI_VERIFIED_PAID_MODELS", "{}").strip() or "{}",
+            gemini_api_key=SecretStr(os.getenv("GEMINI_API_KEY", "").strip()),
+            groq_api_key=SecretStr(os.getenv("GROQ_API_KEY", "").strip()),
+            glm_api_key=SecretStr(os.getenv("GLM_API_KEY", "").strip()),
         )
+
+    def provider_api_key(self, provider: str) -> str:
+        """Return the configured service key for internal upstream requests only."""
+        field = {"gemini": self.gemini_api_key, "groq": self.groq_api_key, "glm": self.glm_api_key}.get(provider)
+        return field.get_secret_value().strip() if field else ""
 
     @property
     def smtp_configured(self) -> bool:

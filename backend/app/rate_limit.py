@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import defaultdict, deque
+from ipaddress import ip_address
 
 from fastapi import HTTPException, Request
 
@@ -29,5 +30,26 @@ class RateLimiter:
 def limit_request(request: Request, action: str, limit: int, window_seconds: int) -> None:
     if request.app.state.settings.app_env == "test":
         return
-    client = request.client.host if request.client else "unknown"
+    client = rate_limit_client_identity(request)
     request.app.state.rate_limiter.check(f"{action}:{client}", limit, window_seconds)
+
+
+def rate_limit_client_identity(request: Request) -> str:
+    """Use Render/Cloudflare's edge-generated single-IP header in production.
+
+    Uvicorn's configured proxy middleware trusts forwarded headers for the
+    public Render proxy. Do not use its rewritten client address for limits:
+    arbitrary leftmost X-Forwarded-For values can be supplied by a caller.
+    Render routes public traffic through Cloudflare, which supplies
+    CF-Connecting-IP. If it is absent or invalid, share a fail-closed bucket.
+    """
+    if request.app.state.settings.app_env == "production":
+        values = request.headers.getlist("cf-connecting-ip")
+        if len(values) == 1:
+            try:
+                return ip_address(values[0].strip()).compressed
+            except ValueError:
+                pass
+        return "unverified-proxy-client"
+
+    return request.client.host if request.client else "unknown"

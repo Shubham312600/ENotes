@@ -19,7 +19,7 @@ Start the API (SQLite is created at `backend/data/enotes.db`):
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-The backend creates its local development schema on startup. To use Alembic migrations instead, run `python -m alembic upgrade head` from this directory. For production, set `APP_ENV=production`, configure a strong random `JWT_SECRET` (at least 32 characters), and provide a TLS-enabled PostgreSQL `DATABASE_URL`. Production startup deliberately rejects SQLite and does not create its schema automatically; run `alembic upgrade head` before serving. Password-reset mail is optional, but recovery returns `503` until SMTP or Resend is configured. See [DEPLOYMENT.md](DEPLOYMENT.md) for the Render and Neon setup.
+The backend creates its local development schema on startup. To use Alembic migrations instead, run `python -m alembic upgrade head` from this directory. For a release deployment set `APP_ENV=production`, configure a strong random `JWT_SECRET` (at least 32 characters), `DATABASE_URL`, and SMTP settings before starting; startup deliberately does not create a production schema automatically.
 
 Run the automated API and security-flow tests:
 
@@ -37,7 +37,7 @@ python -m pytest -q
 
 The development mail sink is enabled by default. It stores reset messages in memory and is available only outside production at `GET /api/v1/dev/mailbox?email=<address>`. The returned deep link is for local development and contains a short-lived, single-use reset token; do not expose this endpoint publicly. Tokens are stored in the database only as SHA-256 hashes, and are never included in production API responses or logs.
 
-For real delivery, configure either SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS=true`) or Resend (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`), and set `PUBLIC_APP_URL=enotes://reset-password`. The Android app handles that reset deep link. The forgot-password response stays generic whether an email exists or not. Email verification is not enabled in this build; no account is described as verified by the client. Google and Apple sign-in buttons remain visible in the supplied design but report that provider credentials and server-side token validation are not configured. ENotes authentication does not grant Google Drive access.
+For real delivery configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS=true`, and `PUBLIC_APP_URL=enotes://reset-password`. The Android app handles that reset deep link. The forgot-password response stays generic whether an email exists or not. Email verification is not enabled in this build; no account is described as verified by the client. Google and Apple sign-in buttons remain visible in the supplied design but report that provider credentials and server-side token validation are not configured. ENotes authentication does not grant Google Drive access.
 
 ## API
 
@@ -59,8 +59,20 @@ Successful registration/login/refresh returns `access_token`, `refresh_token`, `
 
 Authentication throttling is per process and client IP. A multi-instance deployment must put a shared limiter (for example Redis-backed rate limiting at a reverse proxy) in front of the API. Serve production traffic behind HTTPS; do not disable certificate verification.
 
+## AI provider gateway
+
+The optional authenticated AI gateway supports Gemini, Groq, and GLM through the FastAPI backend. Users can enter provider keys in ENotes; the backend encrypts them with AES-256-GCM before saving them to PostgreSQL. Keys are scoped to the signed-in user and never returned by the API. Alternatively, the service can use optional provider-specific secrets (`GEMINI_API_KEY`, `GROQ_API_KEY`, `GLM_API_KEY`) for accounts without a personal key; each secret is isolated to its provider and never returned to Android. Configure `AI_CREDENTIALS_ENCRYPTION_KEY` privately on the backend to enable user-entered credentials, and preserve it across restarts and restores. Missing encryption configuration does not disable service-managed provider keys or account authentication.
+
+Free-only mode is off by default. When enabled, the backend allows only model IDs explicitly listed in `AI_VERIFIED_FREE_MODELS`; paid, unknown, overlapping, malformed, and unlisted IDs are blocked. An empty free-model list means no model can be used in Free-only mode. Do not populate the allowlist without checking current provider pricing and account eligibility. Provider model listings alone do not prove free eligibility.
+
+Gemini and Groq model IDs are discovered from their documented model-list APIs. The current Z.AI OpenAPI documents chat completions but no model-list API, so GLM IDs must be entered from the user's Z.AI account and tested through chat; the backend does not call an undocumented `/models` route.
+
+Gemini accepts text, JPEG/PNG/WebP/GIF images, and PDF attachments. Groq and GLM accept text attachments only and return a structured client error for binary attachments. Authentication and AI rate limits are in-memory per process; they reset after restart and are not shared between multiple instances.
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete environment-variable table, key generation and backup, PostgreSQL migrations, existing Render service deployment review, verification, and rollback guidance.
+
 ## Database and operations
 
-The initial Alembic revision creates only account, session, and reset-token tables. SQLite is for local development; PostgreSQL is supported via `DATABASE_URL=postgresql+psycopg://...`. Back up the configured database using the database's standard, access-controlled backup procedure; for local SQLite, stop the service and copy `data/enotes.db` and retain the copy securely. Test restore procedures before relying on a backup. Account deletion cascades to account sessions and reset tokens, but never deletes local notes from a device.
+Alembic revision `0001_auth_schema` creates account, session, and reset-token tables. Revision `0002_ai_provider_credentials` adds the AI credentials and preferences. SQLite is for local development; production PostgreSQL uses the installed `psycopg` driver and requires TLS. Back up the configured database using the database's standard, access-controlled backup procedure; for local SQLite, stop the service and copy `data/enotes.db` and retain the copy securely. Test restore procedures before relying on a backup. Account deletion cascades to account sessions, reset tokens, and AI credentials, but never deletes local notes from a device.
 
-Production deployment still needs an internet-reachable HTTPS host, PostgreSQL credentials, a strong JWT secret, operational backups, and privacy/retention policy. Configure a password-reset mail provider if you want account recovery. Free hosting/email quotas vary and are not guaranteed. This repository does not contain deployment credentials or claim a public production service is running.
+Production deployment still needs an internet-reachable host, valid HTTPS, database credentials, a strong JWT secret, SMTP delivery, operational backups, and privacy/retention policy. Free hosting/email quotas vary and are not guaranteed. This repository does not contain deployment credentials or claim a public production service is running.
