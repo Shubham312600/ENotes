@@ -16,7 +16,9 @@ PROVIDERS = {"groq", "gemini", "glm"}
 PROVIDER_LABELS = {"groq": "Groq", "gemini": "Gemini", "glm": "GLM"}
 GEMINI_MODELS_MAX_PAGES = 20
 GLM_MODEL_CATALOG_URL = "https://docs.z.ai/openapi.json"
-logger = logging.getLogger(__name__)
+# Uvicorn configures this INFO-level logger with its stderr handler in Render.
+# The app.ai_proxy logger inherits Python's WARNING root level there, hiding INFO.
+logger = logging.getLogger("uvicorn.error")
 
 
 class _RedactPageTokenFilter(logging.Filter):
@@ -374,23 +376,30 @@ async def list_provider_models(
     gemini_stats: dict[str, int | bool | str] | None = None
     if provider == "gemini":
         gemini_stats = {
+            "provider": "gemini",
             "free_only": free_only,
             "outcome": "upstream_error" if deferred_error is not None else "pagination_error" if pagination_issue is not None else "success",
             "upstream_records_received": len(values),
             "valid_base_model_id_records": 0,
-            "generate_content_records": 0,
+            "valid_model_records": 0,
+            "records_supporting_generate_content": 0,
+            "invalid_model_records": 0,
             "rejected_unsupported_or_malformed_records": 0,
             "duplicate_model_records": 0,
             "verified_free_models": 0,
+            "unknown_pricing_models": 0,
+            "paid_models": 0,
             "pricing_filtered_unknown": 0,
             "pricing_filtered_paid": 0,
             "pages_retrieved": pages_retrieved,
+            "final_models_returned": 0,
         }
     for item in values:
         if provider == "glm":
             model_id = item.strip() if isinstance(item, str) else ""
         elif not isinstance(item, dict):
             if gemini_stats is not None:
+                gemini_stats["invalid_model_records"] += 1
                 gemini_stats["rejected_unsupported_or_malformed_records"] += 1
             continue
         elif provider == "gemini":
@@ -410,10 +419,12 @@ async def list_provider_models(
             if valid_model_id:
                 gemini_stats["valid_base_model_id_records"] += 1
             if supports_generation:
-                gemini_stats["generate_content_records"] += 1
+                gemini_stats["records_supporting_generate_content"] += 1
             if not valid_model_id or not supports_generation:
+                gemini_stats["invalid_model_records"] += 1
                 gemini_stats["rejected_unsupported_or_malformed_records"] += 1
                 continue
+            gemini_stats["valid_model_records"] += 1
         if not valid_model_id:
             continue
         if model_id in seen:
@@ -424,8 +435,13 @@ async def list_provider_models(
             continue
         seen.add(model_id)
         pricing_status = model_pricing_status(settings, provider, model_id, strict=free_only)
-        if gemini_stats is not None and pricing_status == "verified_free":
-            gemini_stats["verified_free_models"] += 1
+        if gemini_stats is not None:
+            if pricing_status == "verified_free":
+                gemini_stats["verified_free_models"] += 1
+            elif pricing_status == "paid":
+                gemini_stats["paid_models"] += 1
+            else:
+                gemini_stats["unknown_pricing_models"] += 1
         if free_only and pricing_status != "verified_free":
             if gemini_stats is not None:
                 field = "pricing_filtered_paid" if pricing_status == "paid" else "pricing_filtered_unknown"
@@ -433,6 +449,9 @@ async def list_provider_models(
             continue
         models.append({"id": model_id, "pricing_status": pricing_status})
     if gemini_stats is not None:
+        gemini_stats["final_models_returned"] = (
+            0 if deferred_error is not None or pagination_issue is not None else len(models)
+        )
         _log_gemini_model_discovery(gemini_stats)
         if deferred_error is not None:
             raise deferred_error

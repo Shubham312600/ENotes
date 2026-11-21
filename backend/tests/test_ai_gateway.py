@@ -388,6 +388,7 @@ def test_gemini_repeated_page_token_fails_safely_and_diagnostics_hide_secrets(ca
     assert "private-model-id-do-not-log" not in log_text
     assert "[REDACTED]" in log_text
     assert '"pages_retrieved":2' in log_text
+    assert '"final_models_returned":0' in log_text
 
 
 def test_gemini_model_discovery_stops_at_configured_page_limit(monkeypatch, client: TestClient) -> None:
@@ -421,6 +422,7 @@ def test_gemini_free_only_uses_exact_allowlist_and_logs_only_safe_counts(caplog)
         assert client.put("/api/v1/ai/settings/free-only", headers=headers, json={"enabled": True}).status_code == 200
         mock_transport(client, lambda _request: httpx.Response(200, json={"models": [
             _gemini_catalog_record("verified-free"),
+            _gemini_catalog_record("verified-free"),
             _gemini_catalog_record("Verified-free"),
             _gemini_catalog_record("verified-free-preview"),
             _gemini_catalog_record("paid-model"),
@@ -431,20 +433,48 @@ def test_gemini_free_only_uses_exact_allowlist_and_logs_only_safe_counts(caplog)
             {"baseModelId": "  ", "supportedGenerationMethods": ["generateContent"]},
             None,
         ]}))
-        with caplog.at_level("INFO", logger="app.ai_proxy"):
+        with caplog.at_level("INFO", logger="uvicorn.error"):
             response = client.get("/api/v1/ai/gemini/models", headers=headers)
         assert response.status_code == 200, response.text
         assert response.json()["data"] == [{"id": "verified-free", "pricing_status": "verified_free"}]
-        assert '"upstream_records_received":10' in caplog.text
-        assert '"valid_base_model_id_records":7' in caplog.text
-        assert '"generate_content_records":7' in caplog.text
+        assert any(record.name == "uvicorn.error" for record in caplog.records)
+        assert '"provider":"gemini"' in caplog.text
+        assert '"upstream_records_received":11' in caplog.text
+        assert '"valid_base_model_id_records":8' in caplog.text
+        assert '"valid_model_records":6' in caplog.text
+        assert '"records_supporting_generate_content":8' in caplog.text
+        assert '"invalid_model_records":5' in caplog.text
         assert '"rejected_unsupported_or_malformed_records":5' in caplog.text
+        assert '"duplicate_model_records":1' in caplog.text
         assert '"verified_free_models":1' in caplog.text
+        assert '"unknown_pricing_models":3' in caplog.text
+        assert '"paid_models":1' in caplog.text
         assert '"pricing_filtered_unknown":3' in caplog.text
         assert '"pricing_filtered_paid":1' in caplog.text
+        assert '"final_models_returned":1' in caplog.text
         assert "gemini-do-not-log-this-key" not in caplog.text
         for model_id in ("verified-free", "Verified-free", "paid-model", "unknown-model"):
             assert model_id not in caplog.text
+
+
+def test_gemini_diagnostics_distinguish_empty_upstream_from_free_only_filtering(caplog) -> None:
+    with _ai_client_with_allowlists("{}", "{}") as client:
+        headers = sign_in(client, "gemini-empty-versus-filtered@example.com")
+        assert client.put("/api/v1/ai/gemini/credential", headers=headers, json={"api_key": "gemini-test-secret-value"}).status_code == 200
+        assert client.put("/api/v1/ai/settings/free-only", headers=headers, json={"enabled": True}).status_code == 200
+
+        for records, expected in [
+            ([], {'"upstream_records_received":0', '"unknown_pricing_models":0'}),
+            ([_gemini_catalog_record("unverified-model")], {'"upstream_records_received":1', '"valid_model_records":1', '"unknown_pricing_models":1', '"pricing_filtered_unknown":1'}),
+        ]:
+            caplog.clear()
+            mock_transport(client, lambda _request, records=records: httpx.Response(200, json={"models": records}))
+            with caplog.at_level("INFO", logger="uvicorn.error"):
+                response = client.get("/api/v1/ai/gemini/models", headers=headers)
+            assert response.status_code == 200, response.text
+            assert response.json()["data"] == []
+            assert '"final_models_returned":0' in caplog.text
+            assert all(field in caplog.text for field in expected)
 
 
 @pytest.mark.parametrize("payload", [
