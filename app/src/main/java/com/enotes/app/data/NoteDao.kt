@@ -8,6 +8,12 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface NoteDao {
+    @Query("SELECT * FROM note_folders ORDER BY name COLLATE NOCASE")
+    fun observeFolders(): Flow<List<NoteFolder>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun createFolder(folder: NoteFolder)
+
     @Query("SELECT * FROM notes WHERE deletedAt IS NULL AND isArchived = 0 ORDER BY isPinned DESC, updatedAt DESC")
     fun observeActiveNotes(): Flow<List<Note>>
 
