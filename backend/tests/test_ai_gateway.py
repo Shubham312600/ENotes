@@ -270,7 +270,7 @@ def test_gemini_uses_exact_v1beta_paths_and_its_own_api_key_header(client: TestC
     assert test.status_code == 200 and test.json()["connected"] is True
 
 
-def test_gemini_discovery_uses_base_model_ids_and_omits_unsupported_models(client: TestClient) -> None:
+def test_gemini_discovery_prefers_base_model_ids_and_uses_name_fallback(client: TestClient) -> None:
     headers = sign_in(client, "gemini-base-model-id@example.com")
     assert client.put("/api/v1/ai/gemini/credential", headers=headers, json={"api_key": "gemini-test-secret-value"}).status_code == 200
 
@@ -303,7 +303,9 @@ def test_gemini_discovery_uses_base_model_ids_and_omits_unsupported_models(clien
     mock_transport(client, handler)
     response = client.get("/api/v1/ai/gemini/models", headers=headers)
     assert response.status_code == 200, response.text
-    assert [item["id"] for item in response.json()["data"]] == ["gemini-fast"]
+    assert [item["id"] for item in response.json()["data"]] == [
+        "gemini-fast", "gemini-missing-base-id-001",
+    ]
 
 
 def _gemini_catalog_record(model_id: str, methods: list[str] | None = None) -> dict:
@@ -314,13 +316,45 @@ def _gemini_catalog_record(model_id: str, methods: list[str] | None = None) -> d
     }
 
 
+@pytest.mark.parametrize("record", [
+    {"supportedGenerationMethods": ["generateContent"]},
+    {"name": None, "supportedGenerationMethods": ["generateContent"]},
+    {"name": "gemini-without-resource-prefix", "supportedGenerationMethods": ["generateContent"]},
+    {"name": "models/", "supportedGenerationMethods": ["generateContent"]},
+    {"name": "models/gemini/model", "supportedGenerationMethods": ["generateContent"]},
+    {"name": "models/gemini model", "supportedGenerationMethods": ["generateContent"]},
+    {"name": f"models/{'x' * 201}", "supportedGenerationMethods": ["generateContent"]},
+    {
+        "name": "models/valid-name-fallback",
+        "baseModelId": 42,
+        "supportedGenerationMethods": ["generateContent"],
+    },
+])
+def test_gemini_discovery_rejects_malformed_or_missing_identifiers(
+    client: TestClient, record: dict,
+) -> None:
+    headers = sign_in(client, f"gemini-invalid-id-{abs(hash(str(record)))}@example.com")
+    assert client.put(
+        "/api/v1/ai/gemini/credential", headers=headers,
+        json={"api_key": "gemini-test-secret-value"},
+    ).status_code == 200
+    mock_transport(client, lambda _request: httpx.Response(200, json={"models": [record]}))
+
+    response = client.get("/api/v1/ai/gemini/models", headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == []
+
+
 def test_gemini_model_discovery_follows_all_pages_and_includes_page_two_models(client: TestClient) -> None:
     headers = sign_in(client, "gemini-pagination@example.com")
     assert client.put("/api/v1/ai/gemini/credential", headers=headers, json={"api_key": "gemini-pagination-test-key"}).status_code == 200
     calls: list[httpx.Request] = []
     pages = {
         None: {"models": [_gemini_catalog_record("page-one-model")], "nextPageToken": "opaque-page-token-one"},
-        "opaque-page-token-one": {"models": [_gemini_catalog_record("page-two-model")], "nextPageToken": "opaque-page-token-two"},
+        "opaque-page-token-one": {
+            "models": [{"name": "models/page-two-model", "supportedGenerationMethods": ["generateContent"]}],
+            "nextPageToken": "opaque-page-token-two",
+        },
         "opaque-page-token-two": {"models": [_gemini_catalog_record("page-three-model")]},
     }
 
@@ -427,6 +461,7 @@ def test_gemini_free_only_uses_exact_allowlist_and_logs_only_safe_counts(caplog)
             _gemini_catalog_record("verified-free-preview"),
             _gemini_catalog_record("paid-model"),
             _gemini_catalog_record("unknown-model"),
+            {"name": "models/name-only-unknown", "supportedGenerationMethods": ["generateContent"]},
             {"baseModelId": "missing-methods"},
             _gemini_catalog_record("embedding-only", ["embedContent"]),
             {"supportedGenerationMethods": ["generateContent"]},
@@ -439,21 +474,22 @@ def test_gemini_free_only_uses_exact_allowlist_and_logs_only_safe_counts(caplog)
         assert response.json()["data"] == [{"id": "verified-free", "pricing_status": "verified_free"}]
         assert any(record.name == "uvicorn.error" for record in caplog.records)
         assert '"provider":"gemini"' in caplog.text
-        assert '"upstream_records_received":11' in caplog.text
+        assert '"upstream_records_received":12' in caplog.text
         assert '"valid_base_model_id_records":8' in caplog.text
-        assert '"valid_model_records":6' in caplog.text
-        assert '"records_supporting_generate_content":8' in caplog.text
+        assert '"name_derived_model_records":1' in caplog.text
+        assert '"valid_model_records":7' in caplog.text
+        assert '"records_supporting_generate_content":9' in caplog.text
         assert '"invalid_model_records":5' in caplog.text
         assert '"rejected_unsupported_or_malformed_records":5' in caplog.text
         assert '"duplicate_model_records":1' in caplog.text
         assert '"verified_free_models":1' in caplog.text
-        assert '"unknown_pricing_models":3' in caplog.text
+        assert '"unknown_pricing_models":4' in caplog.text
         assert '"paid_models":1' in caplog.text
-        assert '"pricing_filtered_unknown":3' in caplog.text
+        assert '"pricing_filtered_unknown":4' in caplog.text
         assert '"pricing_filtered_paid":1' in caplog.text
         assert '"final_models_returned":1' in caplog.text
         assert "gemini-do-not-log-this-key" not in caplog.text
-        for model_id in ("verified-free", "Verified-free", "paid-model", "unknown-model"):
+        for model_id in ("verified-free", "Verified-free", "paid-model", "unknown-model", "name-only-unknown"):
             assert model_id not in caplog.text
 
 

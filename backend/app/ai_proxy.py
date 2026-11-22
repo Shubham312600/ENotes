@@ -335,6 +335,38 @@ def _log_gemini_model_discovery(stats: dict[str, int | bool | str]) -> None:
     )
 
 
+def _normalize_gemini_model_id(record: dict[str, Any]) -> tuple[str, str]:
+    """Prefer Google's base ID, falling back to a validated model resource name."""
+    if "baseModelId" in record:
+        raw_model_id = record["baseModelId"]
+        if not isinstance(raw_model_id, str):
+            return "", "invalid"
+        model_id = raw_model_id.strip()
+        if (
+            not model_id
+            or model_id == "null"
+            or len(model_id) > 200
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", model_id) is None
+        ):
+            return "", "invalid"
+        return model_id, "baseModelId"
+
+    # The Models API documents `name` as `models/{model}`. Keep the resource
+    # leaf intact (including any version suffix); do not guess a base ID.
+    name = record.get("name")
+    if not isinstance(name, str) or not name.startswith("models/"):
+        return "", "invalid"
+    model_id = name[len("models/"):]
+    if (
+        not model_id
+        or model_id == "null"
+        or len(model_id) > 200
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", model_id) is None
+    ):
+        return "", "invalid"
+    return model_id, "name"
+
+
 async def list_provider_models(
     settings: Settings,
     provider: str,
@@ -381,6 +413,7 @@ async def list_provider_models(
             "outcome": "upstream_error" if deferred_error is not None else "pagination_error" if pagination_issue is not None else "success",
             "upstream_records_received": len(values),
             "valid_base_model_id_records": 0,
+            "name_derived_model_records": 0,
             "valid_model_records": 0,
             "records_supporting_generate_content": 0,
             "invalid_model_records": 0,
@@ -395,18 +428,18 @@ async def list_provider_models(
             "final_models_returned": 0,
         }
     for item in values:
+        model_id_source = ""
         if provider == "glm":
             model_id = item.strip() if isinstance(item, str) else ""
-        elif not isinstance(item, dict):
-            if gemini_stats is not None:
-                gemini_stats["invalid_model_records"] += 1
-                gemini_stats["rejected_unsupported_or_malformed_records"] += 1
-            continue
         elif provider == "gemini":
-            # `name` is a versioned resource name. Google documents
-            # `baseModelId` as the identifier to pass to generateContent.
-            raw_model_id = item.get("baseModelId")
-            model_id = raw_model_id.strip() if isinstance(raw_model_id, str) else ""
+            if not isinstance(item, dict):
+                if gemini_stats is not None:
+                    gemini_stats["invalid_model_records"] += 1
+                    gemini_stats["rejected_unsupported_or_malformed_records"] += 1
+                continue
+            model_id, model_id_source = _normalize_gemini_model_id(item)
+        elif not isinstance(item, dict):
+            continue
         else:
             raw_model_id = item.get("id")
             model_id = raw_model_id.strip() if isinstance(raw_model_id, str) else ""
@@ -416,8 +449,10 @@ async def list_provider_models(
             methods = item.get("supportedGenerationMethods")
             supports_generation = isinstance(methods, list) and "generateContent" in methods
             assert gemini_stats is not None
-            if valid_model_id:
+            if valid_model_id and model_id_source == "baseModelId":
                 gemini_stats["valid_base_model_id_records"] += 1
+            elif valid_model_id and model_id_source == "name":
+                gemini_stats["name_derived_model_records"] += 1
             if supports_generation:
                 gemini_stats["records_supporting_generate_content"] += 1
             if not valid_model_id or not supports_generation:
